@@ -16,12 +16,13 @@ export type PrismaQueueOptions<T, U> = {
 };
 
 export type EnqueueOptions = {
+  cron?: string;
   runAt?: Date;
   key?: string;
   maxAttempts?: number;
   priority?: number;
 };
-export type ScheduleOptions = Omit<EnqueueOptions, 'key' | 'runAt'> & {
+export type ScheduleOptions = Omit<EnqueueOptions, 'key' | 'cron' | 'runAt'> & {
   key: string;
   cron: string;
 };
@@ -79,10 +80,10 @@ export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult 
   public async enqueue(payloadOrFunction: T | JobCreator<T>, options: EnqueueOptions = {}): Promise<PrismaJob<T, U>> {
     debug(`enqueue(${JSON.stringify(payloadOrFunction)})`);
     const {prisma, name: queueName} = this;
-    const {key, maxAttempts, priority = 0, runAt} = options;
+    const {key, cron, maxAttempts, priority = 0, runAt} = options;
     const record = await prisma.$transaction(async (client) => {
       const payload = payloadOrFunction instanceof Function ? await payloadOrFunction(client) : payloadOrFunction;
-      const data = {queue: queueName, payload, maxAttempts, priority, runAt};
+      const data = {queue: queueName, cron, payload, maxAttempts, priority, runAt};
       if (key && runAt) {
         const {count} = await this.model.deleteMany({
           where: {
@@ -112,7 +113,7 @@ export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult 
     const {key, cron, ...otherOptions} = options;
     const runAt = Cron(cron).next();
     assert(runAt, `Failed to find a future occurence for given cron`);
-    return this.enqueue(payloadOrFunction, {key, runAt, ...otherOptions});
+    return this.enqueue(payloadOrFunction, {key, cron, runAt, ...otherOptions});
   }
 
   private async poll(): Promise<void> {
@@ -127,8 +128,8 @@ export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult 
         this.concurrency++;
         setImmediate(() =>
           this.dequeue()
-            .then((count) => {
-              if (count === 0) {
+            .then((job) => {
+              if (!job) {
                 estimatedQueueSize = 0;
               }
             })
@@ -149,14 +150,15 @@ export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult 
   // https://www.2ndquadrant.com/en/blog/what-is-select-skip-locked-for-in-postgresql-9-5/
   // @TODO https://docs.quirrel.dev/api/queue
   // https://github.com/quirrel-dev/quirrel/blob/main/package.json
-  private async dequeue(): Promise<number | undefined> {
+  private async dequeue(): Promise<PrismaJob<T, U> | null> {
     debug(`dequeue()`);
     if (this.stopped) {
-      return;
+      return null;
     }
     const {prisma, name: queueName} = this;
-    const tableName = escape(this.config.tableName);
-    return await prisma.$transaction(
+    const {tableName: tableNameRaw} = this.config;
+    const tableName = escape(tableNameRaw);
+    const job = await prisma.$transaction(
       async (client) => {
         const rows = await client.$queryRawUnsafe<DatabaseJob<T, U>[]>(
           `UPDATE ${tableName} SET "processedAt" = NOW(), "attempts" = "attempts" + 1
@@ -174,40 +176,55 @@ export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult 
            RETURNING *;`,
           queueName
         );
-        // d({ rows });
         if (rows.length < 1) {
-          return 0;
+          // @NOTE Failed to acquire a lock
+          return null;
         }
-        const {id, payload, attempts} = rows[0];
+        const {id, cron, payload, attempts, maxAttempts} = rows[0];
         const job = new PrismaJob(rows[0], {prisma: client});
         let result;
         try {
           assert(this.worker, 'Missing queue worker to process job');
           debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
           result = await this.worker(job, prisma);
+          const date = new Date();
           await client.queueJob.update({
             where: {id: id},
-            data: {finishedAt: new Date(), progress: 100, result, error: Prisma.DbNull},
+            data: {finishedAt: date, progress: 100, result, error: Prisma.DbNull},
           });
+          if (cron) {
+            // @TODO schedule next cron
+          }
         } catch (err) {
+          const date = new Date();
           debug(`failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${err}"`);
-          const delay = calculateDelay(attempts);
-          const nextRunAt = new Date(Date.now() + delay);
-          debug(`will retry at runAt=${nextRunAt.toISOString()} (attempts=${attempts})`);
+          const isFinished = maxAttempts && attempts >= maxAttempts;
+          const notBefore = new Date(date.getTime() + calculateDelay(attempts));
+          if (!isFinished) {
+            debug(`will retry at notBefore=${notBefore.toISOString()} (attempts=${attempts})`);
+          }
           await client.queueJob.update({
             where: {id: id},
-            data: {
-              failedAt: new Date(),
-              error: serializeError(err),
-              notBefore: new Date(Date.now() + calculateDelay(attempts)),
-            },
+            data: {finishedAt: isFinished ? date : null, failedAt: date, error: serializeError(err), notBefore},
           });
         }
-        return rows.length;
+        return job;
       },
       // @NOTE https://github.com/prisma/prisma/issues/11565#issuecomment-1031380271
       {timeout: 864e5}
     );
+    if (job) {
+      this.emit('dequeue', job);
+    }
+    return job;
+  }
+
+  public async next(): Promise<PrismaJob<T, U>> {
+    return new Promise((resolve, reject) => {
+      this.once('dequeue', (job) => {
+        resolve(job);
+      });
+    });
   }
 
   public async size(): Promise<number> {

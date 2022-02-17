@@ -15,6 +15,7 @@ model QueueJob {
   id          BigInt    @id @default(autoincrement()) @db.BigInt
   queue       String
   key         String?
+  cron        String?
   payload     Json?
   result      Json?
   error       Json?
