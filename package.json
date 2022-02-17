@@ -38,10 +38,17 @@
     "typescript": "^4.5.5"
   },
   "peerDependencies": {
-    "@prisma/client": "*"
+    "@prisma/client": ">=3"
   },
   "dependencies": {
     "croner": "^4.1.97",
     "debug": "^4.3.3"
-  }
+  },
+  "keywords": [
+    "prisma",
+    "postgresql",
+    "job",
+    "queue",
+    "worker"
+  ]
 }
