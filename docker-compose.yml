@@ -1,0 +1,18 @@
+version: '3.9'
+
+services:
+  # https://hub.docker.com/r/bitnami/postgresql
+  # https://github.com/bitnami/bitnami-docker-postgresql
+  postgresql:
+    container_name: ets_postgresql
+    hostname: ets-postgresql
+    # image: docker.io/bitnami/postgresql:11.13.0-debian-10-r89
+    image: docker.io/bitnami/postgresql:14.1.0-debian-10-r30
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRESQL_USERNAME: ${POSTGRES_USER:-postgres}
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRESQL_DATABASE: prisma-queue
+    volumes:
+      - './data/postgresql:/bitnami/postgresql/data'

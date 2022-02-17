@@ -1,0 +1,33 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["interactiveTransactions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model QueueJob {
+  id          BigInt    @id @default(autoincrement()) @db.BigInt
+  queue       String
+  payload     Json?
+  result      Json?
+  error       Json?
+  progress    Int       @default(0)
+  priority    Int       @default(0)
+  attempts    Int       @default(0)
+  maxAttempts Int?
+  runAt       DateTime  @default(now())
+  finishedAt  DateTime?
+  processedAt DateTime?
+  failedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([queue, runAt, finishedAt])
+  @@index([finishedAt])
+}

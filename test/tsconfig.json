@@ -1,0 +1,10 @@
+{
+  "extends": "@tsconfig/node12/tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "./",
+    "paths": {
+      "src/*": ["./../src/*"],
+      "test/*": ["./*"]
+    }
+  }
+}
