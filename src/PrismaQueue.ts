@@ -6,7 +6,7 @@ import {PrismaJob} from './PrismaJob';
 import {DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker} from './types';
 import {calculateDelay, debug, escape, getTableName, serializeError, waitFor} from './utils';
 
-export type PrismaQueueOptions<T, U> = {
+export type PrismaQueueOptions = {
   prisma?: PrismaClient;
   name?: string;
   maxConcurrency?: number;
@@ -32,13 +32,13 @@ const JOB_INTERVAL = 25;
 export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult = JobResult> extends EventEmitter {
   private name: string;
   private prisma: PrismaClient;
-  private config: Required<Omit<PrismaQueueOptions<T, U>, 'name' | 'prisma'>>;
+  private config: Required<Omit<PrismaQueueOptions, 'name' | 'prisma'>>;
 
   private count = 0;
   private concurrency = 0;
   private stopped = true;
 
-  public constructor(private options: PrismaQueueOptions<T, U> = {}, public worker?: JobWorker<T, U>) {
+  public constructor(private options: PrismaQueueOptions = {}, public worker?: JobWorker<T, U>) {
     super();
 
     const {
@@ -217,14 +217,6 @@ export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult 
       this.emit('dequeue', job);
     }
     return job;
-  }
-
-  public async next(): Promise<PrismaJob<T, U>> {
-    return new Promise((resolve, reject) => {
-      this.once('dequeue', (job) => {
-        resolve(job);
-      });
-    });
   }
 
   public async size(): Promise<number> {

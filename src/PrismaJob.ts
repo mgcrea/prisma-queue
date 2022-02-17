@@ -1,13 +1,13 @@
 import {DatabaseJob, PrismaLightClient} from './types';
 
-export type PrismaJobOptions<T, U> = {
+export type PrismaJobOptions = {
   prisma: PrismaLightClient;
 };
 
 export class PrismaJob<T, U> {
   #prisma: PrismaLightClient;
 
-  constructor(private record: DatabaseJob<T, U>, {prisma}: PrismaJobOptions<T, U>) {
+  constructor(private record: DatabaseJob<T, U>, {prisma}: PrismaJobOptions) {
     this.#prisma = prisma;
   }
 
