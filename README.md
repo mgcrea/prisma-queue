@@ -22,7 +22,7 @@
 
 ## Features
 
-Minimalist postgresql job queue for [Prisma](https://prisma.io)
+Simple, reliable and efficient concurrent work queue for [Prisma](https://prisma.io) + [PostgreSQL](https://www.postgresql.org/)
 
 - Leverages [SKIP LOCKED](https://www.2ndquadrant.com/en/blog/what-is-select-skip-locked-for-in-postgresql-9-5/) to safely dequeue jobs
 
