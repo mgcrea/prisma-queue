@@ -33,7 +33,7 @@ describe('PrismaQueue', () => {
     });
   });
 
-  describe.only('schedule', () => {
+  describe('schedule', () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
     beforeAll(async () => {
       await prisma.queueJob.deleteMany();

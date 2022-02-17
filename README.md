@@ -22,7 +22,21 @@
 
 ## Features
 
-@TODO
+Minimalist postgresql job queue for [Prisma](https://prisma.io)
+
+- Straightforward API to queue jobs
+
+- Leverages [SKIP LOCKED](https://www.2ndquadrant.com/en/blog/what-is-select-skip-locked-for-in-postgresql-9-5/) to safely dequeue jobs
+
+- Supports [crontab](https://crontab.guru) for scheduled jobs
+
+- Keeps historic jobs with persisted results / failures
+
+- Exponential backoff for failing jobs
+
+- Supports Priority index
+
+- Written in [TypeScript](https://www.typescriptlang.org/) for static type checking with exported types along the library.
 
 ## Install
 
@@ -32,7 +46,48 @@ npm install @mgcrea/prisma-queue --save
 
 ## Quickstart
 
-@TODO
+1. First add `"interactiveTransactions"` to your `schema.prisma` client configuration:
+
+```prisma
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["interactiveTransactions"]
+}
+```
+
+1. Append the [`QueueJob` model](./prisma/schema.prisma) to your `schema.prisma` file
+
+1. Create your queue
+
+```ts
+type JobPayload = {email: string};
+type JobResult = {status: number};
+
+export const emailQueue = createQueue<JobPayload, JobResult>({name: 'email'}, async (job, client) => {
+  const {id, payload} = job;
+  console.log(`Processing job#${id} with payload=${JSON.stringify(payload)})`);
+  // await someAsyncMethod();
+  await job.progress(50);
+  const status = 200;
+  if (Math.random() > 0.5) {
+    throw new Error(`Failed for some unknown reason`);
+  }
+  console.log(`Finished job#${id} with status=${status}`);
+  return {status};
+});
+```
+
+1. Queue a job
+
+```ts
+import {emailQueue} from './emailQueue';
+
+const main = async () => {
+  const job = await emailQueue.enqueue({email: 'olivier@mgcrea.io'});
+};
+
+main();
+```
 
 ## Authors
 
@@ -43,7 +98,7 @@ npm install @mgcrea/prisma-queue --save
 ```md
 The MIT License
 
-Copyright (c) 2020 Olivier Louvignes <olivier@mgcrea.io>
+Copyright (c) 2022 Olivier Louvignes <olivier@mgcrea.io>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
 documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
