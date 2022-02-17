@@ -17,7 +17,6 @@ Array [
   "concurrency",
   "stopped",
   "name",
-  "prisma",
   "config",
 ]
 `;
