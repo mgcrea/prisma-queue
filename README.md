@@ -83,7 +83,7 @@ main();
 
 1. Schedule a recurring job
 
-````ts
+```ts
 import {emailQueue} from './emailQueue';
 
 const main = async () => {
@@ -91,10 +91,18 @@ const main = async () => {
 };
 
 main();
+```
 
 ## Authors
 
 - [Olivier Louvignes](https://github.com/mgcrea) <<olivier@mgcrea.io>>
+
+## Credits
+
+Heavily inspired from
+
+- [pg-queue](https://github.com/OrKoN/pg-queue) by
+  [Alex Rudenko](https://github.com/OrKoN)
 
 ## License
 
@@ -115,4 +123,4 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-````
+```
