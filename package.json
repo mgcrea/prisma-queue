@@ -13,8 +13,8 @@
     "prettycheck": "prettier --check src/ test/",
     "typecheck": "tsc --noEmit",
     "spec": "DEBUG=prisma-queue,prisma-query jest --runInBand",
-    "test": "npm run lint && npm run prettycheck && npm run typecheck",
-    "prepublish": "npm run build"
+    "test": "npm run lint && npm run prettycheck && npm run typecheck && npm run spec",
+    "prepublishOnly": "npm run build"
   },
   "author": "Olivier Louvignes <olivier@mgcrea.io>",
   "license": "MIT",
@@ -38,8 +38,11 @@
     "ts-node": "^10.5.0",
     "typescript": "^4.5.5"
   },
+  "peerDependencies": {
+    "@prisma/client": "*"
+  },
   "dependencies": {
-    "@prisma/client": "^3.9.2",
+    "croner": "^4.1.97",
     "debug": "^4.3.3"
   }
 }

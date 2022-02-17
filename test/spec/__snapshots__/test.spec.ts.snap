@@ -1,0 +1,35 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`PrismaQueue dequeue should properly dequeue a failed job 1`] = `
+Array [
+  "record",
+]
+`;
+
+exports[`PrismaQueue dequeue should properly dequeue a successful job 1`] = `
+Array [
+  "record",
+]
+`;
+
+exports[`PrismaQueue enqueue should properly enqueue a job 1`] = `
+Array [
+  "record",
+]
+`;
+
+exports[`PrismaQueue should properly create a queue 1`] = `
+Array [
+  "_events",
+  "_eventsCount",
+  "_maxListeners",
+  "options",
+  "worker",
+  "count",
+  "concurrency",
+  "stopped",
+  "name",
+  "prisma",
+  "config",
+]
+`;

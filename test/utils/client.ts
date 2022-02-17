@@ -28,3 +28,7 @@ prisma.$on('query', (queryEvent) => {
   const {query, duration, params} = queryEvent;
   debug(`${query} with params=${params} (took ${duration}ms)`);
 });
+
+// prisma.$use((params, next) => {
+
+// })
