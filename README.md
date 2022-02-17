@@ -24,17 +24,9 @@
 
 Minimalist postgresql job queue for [Prisma](https://prisma.io)
 
-- Straightforward API to queue jobs
-
 - Leverages [SKIP LOCKED](https://www.2ndquadrant.com/en/blog/what-is-select-skip-locked-for-in-postgresql-9-5/) to safely dequeue jobs
 
-- Supports [crontab](https://crontab.guru) for scheduled jobs
-
-- Keeps historic jobs with persisted results / failures
-
-- Exponential backoff for failing jobs
-
-- Supports Priority index
+- Supports [crontab](https://crontab.guru) syntax for complex scheduled jobs
 
 - Written in [TypeScript](https://www.typescriptlang.org/) for static type checking with exported types along the library.
 
@@ -83,11 +75,22 @@ export const emailQueue = createQueue<JobPayload, JobResult>({name: 'email'}, as
 import {emailQueue} from './emailQueue';
 
 const main = async () => {
-  const job = await emailQueue.enqueue({email: 'olivier@mgcrea.io'});
+  const job = await emailQueue.enqueue({email: 'foo@bar.com'});
 };
 
 main();
 ```
+
+1. Schedule a recurring job
+
+````ts
+import {emailQueue} from './emailQueue';
+
+const main = async () => {
+  const nextJob = await queue.schedule({key: 'email-schedule', cron: '5 5 * * *'}, {email: 'foo@bar.com'});
+};
+
+main();
 
 ## Authors
 
@@ -112,4 +115,4 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-```
+````
