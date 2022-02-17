@@ -25,6 +25,8 @@ jobs:
           cache: 'npm'
       - name: Install 🪄
         run: npm ci
+      - name: Generate schema 🪄
+        run: npx prisma generate
       - name: Lint 🔍
         run: npm run lint
       - name: Prettier 🔍
@@ -50,5 +52,7 @@ jobs:
           cache: 'npm'
       - name: Install 🪄
         run: npm ci
+      - name: Generate schema 🪄
+        run: npx prisma generate
       - name: Build 💎
         run: npm run build
