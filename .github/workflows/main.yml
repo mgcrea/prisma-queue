@@ -16,11 +16,11 @@ jobs:
     name: Test on node@v${{ matrix.node }}
     services:
       postgres:
-        image: docker.io/bitnami/postgresql:14.1.0-debian-10-r30
+        image: postgres:14
         env:
-          POSTGRESQL_USERNAME: ${POSTGRES_USER:-postgres}
-          POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-          POSTGRESQL_DATABASE: prisma-queue
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: changeme
+          POSTGRES_DB: prisma-queue
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
