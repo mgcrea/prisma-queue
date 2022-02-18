@@ -4,10 +4,9 @@
   "description": "Fast and lean prisma-based task queue",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
-  "bin": {
-    "prisma-queue": "./lib/bin/cli.js"
-  },
+  "access": "public",
   "scripts": {
+    "start": "npm run spec -- --watch",
     "build": "rimraf lib/*; tsc --build",
     "lint": "eslint src/ test/",
     "prettycheck": "prettier --check src/ test/",
@@ -17,6 +16,7 @@
     "prepublishOnly": "npm run build"
   },
   "author": "Olivier Louvignes <olivier@mgcrea.io>",
+  "repository": "github:mgcrea/prisma-queue",
   "license": "MIT",
   "devDependencies": {
     "@tsconfig/node12": "^1.0.9",

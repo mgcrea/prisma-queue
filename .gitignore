@@ -3,5 +3,6 @@
 .idea/
 .vscode/
 *.tsbuildinfo
+data/
 lib/
 node_modules/

@@ -28,7 +28,7 @@ Simple, reliable and efficient concurrent work queue for [Prisma](https://prisma
 
 - Supports [crontab](https://crontab.guru) syntax for complex scheduled jobs
 
-- Written in [TypeScript](https://www.typescriptlang.org/) for static type checking with exported types along the library.
+- Written in [TypeScript](https://www.typescriptlang.org/).
 
 ## Install
 

@@ -219,6 +219,7 @@ export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult 
       this.emit('dequeue', job);
       const {key, cron, payload, finishedAt} = job;
       if (finishedAt && cron && key) {
+        // Schedule next cron
         await this.schedule({key, cron}, payload);
       }
     }
