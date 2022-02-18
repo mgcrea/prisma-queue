@@ -69,7 +69,7 @@ export const emailQueue = createQueue<JobPayload, JobResult>({name: 'email'}, as
 });
 ```
 
-1. Queue a job
+- Queue a job
 
 ```ts
 import {emailQueue} from './emailQueue';
@@ -81,13 +81,25 @@ const main = async () => {
 main();
 ```
 
-1. Schedule a recurring job
+- Schedule a recurring job
 
 ```ts
 import {emailQueue} from './emailQueue';
 
 const main = async () => {
   const nextJob = await queue.schedule({key: 'email-schedule', cron: '5 5 * * *'}, {email: 'foo@bar.com'});
+};
+
+main();
+```
+
+- Start queue processing (usually in another process)
+
+```ts
+import {emailQueue} from './emailQueue';
+
+const main = async () => {
+  await queue.start();
 };
 
 main();
