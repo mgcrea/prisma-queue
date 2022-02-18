@@ -2,7 +2,15 @@ import {PrismaClient} from '@prisma/client';
 import {PrismaQueue} from 'src/index';
 import {PrismaJob} from 'src/PrismaJob';
 import {debug, serializeError} from 'src/utils';
-import {createEmailQueue, JobPayload, JobResult, prisma, waitForNextJob, waitForNthJob} from 'test/utils';
+import {
+  createEmailQueue,
+  JobPayload,
+  JobResult,
+  prisma,
+  waitForNextEvent,
+  waitForNextJob,
+  waitForNthJob,
+} from 'test/utils';
 
 describe('PrismaQueue', () => {
   it('should properly create a queue', () => {
@@ -12,13 +20,21 @@ describe('PrismaQueue', () => {
   });
   describe('enqueue', () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
-    beforeAll(() => {
+    beforeAll(async () => {
       queue = createEmailQueue();
+    });
+    beforeEach(async () => {
+      await prisma.queueJob.deleteMany();
+      queue.start();
+    });
+    afterEach(async () => {
+      queue.stop();
     });
     it('should properly enqueue a job', async () => {
       const job = await queue.enqueue({email: 'foo@bar.com'});
       expect(job).toBeInstanceOf(PrismaJob);
       expect(Object.keys(job)).toMatchSnapshot();
+      d({job});
       const record = await job.fetch();
       expect(record?.payload).toEqual({email: 'foo@bar.com'});
       expect(record?.runAt).toBeInstanceOf(Date);
@@ -28,8 +44,14 @@ describe('PrismaQueue', () => {
   describe('schedule', () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
     beforeAll(async () => {
-      await prisma.queueJob.deleteMany();
       queue = createEmailQueue();
+    });
+    beforeEach(async () => {
+      await prisma.queueJob.deleteMany();
+      queue.start();
+    });
+    afterEach(async () => {
+      queue.stop();
     });
     it('should properly schedule a recurring job', async () => {
       const job = await queue.schedule({key: 'email-schedule', cron: '5 5 * * *'}, {email: 'foo@bar.com'});
@@ -37,6 +59,16 @@ describe('PrismaQueue', () => {
       const record = await job.fetch();
       expect(record?.runAt.getHours()).toEqual(5);
       expect(record?.runAt.getMinutes()).toEqual(5);
+    });
+    it('should properly re-enqueue a recurring job', async () => {
+      await queue.schedule({key: 'email-schedule', cron: '5 5 * * *', runAt: new Date()}, {email: 'foo@bar.com'});
+      queue.start();
+      await waitForNextEvent(queue, 'enqueue');
+      const jobs = await prisma.queueJob.findMany({where: {key: 'email-schedule'}});
+      expect(jobs.length).toEqual(2);
+      const record = jobs[1];
+      expect(record.runAt.getHours()).toEqual(5);
+      expect(record.runAt.getMinutes()).toEqual(5);
     });
     it('should properly upsert a recurring job', async () => {
       await queue.schedule({key: 'email-schedule', cron: '5 5 * * *'}, {email: 'foo@bar.com'});
@@ -57,10 +89,14 @@ describe('PrismaQueue', () => {
   describe('dequeue', () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
     beforeAll(async () => {
-      await prisma.queueJob.deleteMany();
       queue = createEmailQueue();
-      const promise = queue.start();
-      expect(promise instanceof Promise);
+    });
+    beforeEach(async () => {
+      await prisma.queueJob.deleteMany();
+      queue.start();
+    });
+    afterEach(async () => {
+      queue.stop();
     });
     it('should properly dequeue a successful job', async () => {
       queue.worker = jest.fn(async (_job) => {
@@ -95,8 +131,14 @@ describe('PrismaQueue', () => {
   describe('priority', () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
     beforeAll(async () => {
-      await prisma.queueJob.deleteMany();
       queue = createEmailQueue();
+    });
+    beforeEach(async () => {
+      await prisma.queueJob.deleteMany();
+      // queue.start();
+    });
+    afterEach(async () => {
+      queue.stop();
     });
     it('should properly prioritize a job with a lower priority', async () => {
       queue.worker = jest.fn(async (_job) => {
@@ -110,14 +152,14 @@ describe('PrismaQueue', () => {
       expect(queue.worker).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
-          record: expect.objectContaining({payload: {email: 'baz@bar.com'}}),
+          payload: {email: 'baz@bar.com'},
         }),
         expect.any(PrismaClient)
       );
       expect(queue.worker).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
-          record: expect.objectContaining({payload: {email: 'foo@bar.com'}}),
+          payload: {email: 'foo@bar.com'},
         }),
         expect.any(PrismaClient)
       );
@@ -130,10 +172,14 @@ describe('PrismaQueue', () => {
   describe('Job.progress()', () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
     beforeAll(async () => {
-      await prisma.queueJob.deleteMany();
       queue = createEmailQueue();
-      const promise = queue.start();
-      expect(promise instanceof Promise);
+    });
+    beforeEach(async () => {
+      await prisma.queueJob.deleteMany();
+      queue.start();
+    });
+    afterEach(async () => {
+      queue.stop();
     });
     it('should properly update job progress', async () => {
       queue.worker = jest.fn(async (job) => {
@@ -142,6 +188,7 @@ describe('PrismaQueue', () => {
         throw new Error('failed');
       });
       const job = await queue.enqueue({email: 'foo@bar.com'});
+      queue.start();
       await waitForNextJob(queue);
       const record = await job.fetch();
       expect(record?.progress).toEqual(50);

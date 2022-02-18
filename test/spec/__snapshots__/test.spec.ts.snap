@@ -2,7 +2,7 @@
 
 exports[`PrismaQueue enqueue should properly enqueue a job 1`] = `
 Array [
-  "record",
+  "id",
 ]
 `;
 

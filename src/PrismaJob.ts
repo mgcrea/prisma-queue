@@ -1,4 +1,5 @@
 import {DatabaseJob, PrismaLightClient} from './types';
+import {Prisma} from '@prisma/client';
 
 export type PrismaJobOptions = {
   prisma: PrismaLightClient;
@@ -6,31 +7,56 @@ export type PrismaJobOptions = {
 
 export class PrismaJob<T, U> {
   #prisma: PrismaLightClient;
+  #record: DatabaseJob<T, U>;
 
-  constructor(private record: DatabaseJob<T, U>, {prisma}: PrismaJobOptions) {
+  public readonly id;
+
+  constructor(record: DatabaseJob<T, U>, {prisma}: PrismaJobOptions) {
     this.#prisma = prisma;
+    this.#record = record;
+    this.id = record.id;
   }
 
-  public get id() {
-    return this.record.id;
+  #assign(record?: DatabaseJob<T, U>) {
+    if (record) {
+      this.#record = record;
+    }
+  }
+
+  public get key() {
+    return this.#record.key;
+  }
+  public get cron() {
+    return this.#record.cron;
   }
   public get priority() {
-    return this.record.priority;
+    return this.#record.priority;
   }
   public get payload() {
-    return this.record.payload;
+    return this.#record.payload;
+  }
+  public get finishedAt() {
+    return this.#record.finishedAt;
   }
 
   public async progress(progress: number) {
-    return await this.#prisma.queueJob.update({
-      where: {id: this.id},
-      data: {progress: Math.max(0, Math.min(100, progress))},
-    });
+    return await this.update({progress: Math.max(0, Math.min(100, progress))});
   }
 
   public async fetch() {
-    return await this.#prisma.queueJob.findUnique({
+    const record = (await this.#prisma.queueJob.findUnique({
       where: {id: this.id},
-    });
+    })) as DatabaseJob<T, U>;
+    this.#assign(record);
+    return record;
+  }
+
+  public async update(data: Prisma.QueueJobUpdateInput) {
+    const record = (await this.#prisma.queueJob.update({
+      where: {id: this.id},
+      data,
+    })) as DatabaseJob<T, U>;
+    this.#assign(record);
+    return record;
   }
 }
