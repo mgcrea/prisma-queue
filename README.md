@@ -99,7 +99,7 @@ main();
 
 ## Credits
 
-Heavily inspired from
+Inspired by
 
 - [pg-queue](https://github.com/OrKoN/pg-queue) by
   [Alex Rudenko](https://github.com/OrKoN)
