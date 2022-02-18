@@ -69,18 +69,18 @@ export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult 
   }
 
   public async start(): Promise<void> {
-    debug(`start()`);
+    debug(`start`);
     this.stopped = false;
     return this.poll();
   }
 
   public async stop(): Promise<void> {
-    debug(`stop()`);
+    debug(`stop`);
     this.stopped = true;
   }
 
   public async enqueue(payloadOrFunction: T | JobCreator<T>, options: EnqueueOptions = {}): Promise<PrismaJob<T, U>> {
-    debug(`enqueue(${JSON.stringify(payloadOrFunction)})`);
+    debug(`enqueue`, payloadOrFunction);
     const {name: queueName} = this;
     const {key, cron, maxAttempts, priority = 0, runAt} = options;
     const record = await this.#prisma.$transaction(async (client) => {
@@ -113,7 +113,7 @@ export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult 
   }
 
   public async schedule(options: ScheduleOptions, payloadOrFunction: T | JobCreator<T>): Promise<PrismaJob<T, U>> {
-    debug(`schedule(${JSON.stringify(options)})`);
+    debug(`schedule`, options);
     const {key, cron, runAt: firstRunAt, ...otherOptions} = options;
     const runAt = firstRunAt || Cron(cron).next();
     assert(runAt, `Failed to find a future occurence for given cron`);
@@ -124,6 +124,7 @@ export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult 
     if (this.stopped) {
       return;
     }
+    debug(`poll`);
     const {maxConcurrency, pollInterval} = this.config;
     let estimatedQueueSize = await this.size();
     while (estimatedQueueSize > 0) {
@@ -145,7 +146,6 @@ export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult 
       await waitFor(JOB_INTERVAL);
     }
 
-    debug(`poll waiting for pollInterval=${pollInterval}`);
     await waitFor(pollInterval);
 
     await this.poll();
@@ -155,10 +155,10 @@ export class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult 
   // @TODO https://docs.quirrel.dev/api/queue
   // https://github.com/quirrel-dev/quirrel/blob/main/package.json
   private async dequeue(): Promise<PrismaJob<T, U> | null> {
-    debug(`dequeue()`);
     if (this.stopped) {
       return null;
     }
+    debug(`dequeue`);
     const {name: queueName} = this;
     const {tableName: tableNameRaw} = this.config;
     const tableName = escape(tableNameRaw);

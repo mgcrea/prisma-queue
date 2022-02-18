@@ -1,0 +1,9 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`module should export a stable API 1`] = `
+Object {
+  "PrismaJob": [Function],
+  "PrismaQueue": [Function],
+  "createQueue": [Function],
+}
+`;
