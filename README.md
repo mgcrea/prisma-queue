@@ -118,7 +118,7 @@ Inspired by
 
 ## License
 
-```md
+```txt
 The MIT License
 
 Copyright (c) 2022 Olivier Louvignes <olivier@mgcrea.io>
