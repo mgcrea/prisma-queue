@@ -104,7 +104,7 @@ describe('PrismaQueue', () => {
       });
       const job = await queue.enqueue({email: 'foo@bar.com'});
       await waitForNextJob(queue);
-      expect(queue.worker).toBeCalledTimes(1);
+      expect(queue.worker).toHaveBeenCalledTimes(1);
       expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), expect.any(PrismaClient));
       const record = await job.fetch();
       expect(record?.finishedAt).toBeInstanceOf(Date);
@@ -117,7 +117,7 @@ describe('PrismaQueue', () => {
       });
       const job = await queue.enqueue({email: 'foo@bar.com'});
       await waitForNextJob(queue);
-      expect(queue.worker).toBeCalledTimes(1);
+      expect(queue.worker).toHaveBeenCalledTimes(1);
       expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), expect.any(PrismaClient));
       const record = await job.fetch();
       expect(record?.finishedAt).toBe(null);
@@ -148,7 +148,7 @@ describe('PrismaQueue', () => {
       await queue.enqueue({email: 'baz@bar.com'}, {priority: -1});
       queue.start();
       await waitForNthJob(queue, 2);
-      expect(queue.worker).toBeCalledTimes(2);
+      expect(queue.worker).toHaveBeenCalledTimes(2);
       expect(queue.worker).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({

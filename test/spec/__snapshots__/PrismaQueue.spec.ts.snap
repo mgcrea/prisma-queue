@@ -1,13 +1,13 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
 exports[`PrismaQueue enqueue should properly enqueue a job 1`] = `
-Array [
+[
   "id",
 ]
 `;
 
 exports[`PrismaQueue should properly create a queue 1`] = `
-Array [
+[
   "_events",
   "_eventsCount",
   "_maxListeners",

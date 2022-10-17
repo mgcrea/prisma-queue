@@ -14,7 +14,8 @@ export const createEmailQueue = (
 
 export const waitForNextJob = (queue: PrismaQueue<JobPayload, JobResult>) => waitForNextEvent(queue, 'dequeue');
 
-export const waitForNthJob = <T, U>(queue: PrismaQueue<T, U>, nth: number) => waitForNthEvent(queue, 'dequeue', nth);
+export const waitForNthJob = <T extends JobPayload, U extends JobResult>(queue: PrismaQueue<T, U>, nth: number) =>
+  waitForNthEvent(queue, 'dequeue', nth);
 
 export const waitForNextEvent = (queue: PrismaQueue<JobPayload, JobResult>, eventName: string) =>
   new Promise((resolve) => {
@@ -23,7 +24,11 @@ export const waitForNextEvent = (queue: PrismaQueue<JobPayload, JobResult>, even
     });
   });
 
-export const waitForNthEvent = <T, U>(queue: PrismaQueue<T, U>, eventName: string, nth = 1) =>
+export const waitForNthEvent = <T extends JobPayload, U extends JobResult>(
+  queue: PrismaQueue<T, U>,
+  eventName: string,
+  nth = 1
+) =>
   new Promise((resolve) => {
     let count = 0;
     const jobs: PrismaJob<T, U>[] = [];
