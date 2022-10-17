@@ -42,7 +42,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           check-latest: true
-          cache: 'npm'
+          cache: 'pnpm'
       - name: Install 🪄
         run: pnpm install --frozen-lockfile
       - name: Generate & push schema 🪄
@@ -73,7 +73,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           check-latest: true
-          cache: 'npm'
+          cache: 'pnpm'
       - name: Install 🪄
         run: pnpm install --frozen-lockfile
       - name: Generate schema 🪄
