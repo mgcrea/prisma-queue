@@ -33,24 +33,28 @@ jobs:
     steps:
       - name: Checkout 🛎️
         uses: actions/checkout@v2
-      - name: Setup 🔧
+      - name: Setup pnpm 🔧
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+      - name: Setup node 🔧
         uses: actions/setup-node@v2
         with:
           node-version: ${{ matrix.node }}
           check-latest: true
           cache: 'npm'
       - name: Install 🪄
-        run: npm ci
+        run: pnpm install --frozen-lockfile
       - name: Generate & push schema 🪄
-        run: npx prisma db push
+        run: pnpm prisma db push
       - name: Lint 🔍
-        run: npm run lint
+        run: pnpm run lint
       - name: Prettier 🔍
-        run: npm run prettycheck
+        run: pnpm run prettycheck
       - name: TypeScript 🔍
-        run: npm run typecheck
+        run: pnpm run typecheck
       - name: Jest 🔍
-        run: npm run spec
+        run: pnpm run spec
   build:
     runs-on: ubuntu-latest
     strategy:
@@ -60,15 +64,19 @@ jobs:
     steps:
       - name: Checkout 🛎️
         uses: actions/checkout@v2
-      - name: Setup 🔧
+      - name: Setup pnpm 🔧
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+      - name: Setup node 🔧
         uses: actions/setup-node@v2
         with:
           node-version: ${{ matrix.node }}
           check-latest: true
           cache: 'npm'
       - name: Install 🪄
-        run: npm ci
+        run: pnpm install --frozen-lockfile
       - name: Generate schema 🪄
-        run: npx prisma generate
+        run: pnpm prisma generate
       - name: Build 💎
-        run: npm run build
+        run: pnpm run build
