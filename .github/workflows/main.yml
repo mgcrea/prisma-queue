@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: ['14', '16', '18']
+        node: ['lts/-1', 'lts/*']
     name: Test on node@v${{ matrix.node }}
     services:
       postgres:
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: ['14', '16', '18']
+        node: ['lts/-1', 'lts/*']
     name: Build on node@v${{ matrix.node }}
     steps:
       - name: Checkout 🛎️
