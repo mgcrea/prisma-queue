@@ -1,6 +1,6 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`module should export a stable API 1`] = `
+exports[`module > should export a stable API 1`] = `
 {
   "PrismaJob": [Function],
   "PrismaQueue": [Function],

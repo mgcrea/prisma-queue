@@ -1,3 +1,3 @@
-import createDebug from 'debug';
+import createDebug from "debug";
 
-export const debug = createDebug('prisma-queue');
+export const debug = createDebug("prisma-queue");

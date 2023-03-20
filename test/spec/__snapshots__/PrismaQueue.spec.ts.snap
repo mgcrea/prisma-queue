@@ -1,22 +1,21 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`PrismaQueue enqueue should properly enqueue a job 1`] = `
+exports[`PrismaQueue > enqueue > should properly enqueue a job 1`] = `
 [
   "id",
 ]
 `;
 
-exports[`PrismaQueue should properly create a queue 1`] = `
+exports[`PrismaQueue > should properly create a queue 1`] = `
 [
   "_events",
   "_eventsCount",
   "_maxListeners",
-  "options",
-  "worker",
-  "count",
-  "concurrency",
-  "stopped",
   "name",
   "config",
+  "concurrency",
+  "stopped",
+  "options",
+  "worker",
 ]
 `;

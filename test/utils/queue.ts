@@ -1,21 +1,24 @@
-import {createQueue, PrismaQueue, PrismaJob} from 'src/index';
-import {JobWorker} from 'src/types';
-import {prisma} from './client';
+import { PrismaJob, PrismaQueue, createQueue } from "src/index";
+import type { JobWorker } from "src/types";
+import { prisma } from "./client";
 
-export type JobPayload = {email: string};
-export type JobResult = {code: string};
+export type JobPayload = { email: string };
+export type JobResult = { code: string };
 
 const pollInterval = 500;
 export const createEmailQueue = (
   worker: JobWorker<JobPayload, JobResult> = async (_job) => {
-    return {code: '200'};
+    return { code: "200" };
   }
-) => createQueue<JobPayload, JobResult>({prisma, pollInterval}, worker);
+) => createQueue<JobPayload, JobResult>({ prisma, pollInterval }, worker);
 
-export const waitForNextJob = (queue: PrismaQueue<JobPayload, JobResult>) => waitForNextEvent(queue, 'dequeue');
+export const waitForNextJob = (queue: PrismaQueue<JobPayload, JobResult>) =>
+  waitForNextEvent(queue, "dequeue");
 
-export const waitForNthJob = <T extends JobPayload, U extends JobResult>(queue: PrismaQueue<T, U>, nth: number) =>
-  waitForNthEvent(queue, 'dequeue', nth);
+export const waitForNthJob = <T extends JobPayload, U extends JobResult>(
+  queue: PrismaQueue<T, U>,
+  nth: number
+) => waitForNthEvent(queue, "dequeue", nth);
 
 export const waitForNextEvent = (queue: PrismaQueue<JobPayload, JobResult>, eventName: string) =>
   new Promise((resolve) => {

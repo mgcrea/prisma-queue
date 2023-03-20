@@ -12,8 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: ['lts/-1', 'lts/*', '*']
-    name: Test on node@${{ matrix.node }}
+        node: ["lts/-1", "lts/*"]
+    name: Test on node@v${{ matrix.node }}
     services:
       postgres:
         image: postgres:14
@@ -29,23 +29,23 @@ jobs:
         ports:
           - 5432:5432
     env:
-      DATABASE_URL: 'postgresql://postgres:changeme@localhost:5432/postgres?schema=public'
+      DATABASE_URL: "postgresql://postgres:changeme@localhost:5432/postgres?schema=public"
     steps:
       - name: Checkout 🛎️
         uses: actions/checkout@v3
       - name: Setup pnpm 🔧
         uses: pnpm/action-setup@v2
         with:
-          version: latest
+          version: 7
       - name: Setup node 🔧
         uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node }}
           check-latest: true
-          cache: 'pnpm'
+          cache: "pnpm"
       - name: Install 🪄
         run: pnpm install --frozen-lockfile
-      - name: Generate & push schema 🪄
+      - name: Generate & push prisma schema 🪄
         run: pnpm prisma db push
       - name: Lint 🔍
         run: pnpm run lint
@@ -53,30 +53,30 @@ jobs:
         run: pnpm run prettycheck
       - name: TypeScript 🔍
         run: pnpm run typecheck
-      - name: Jest 🔍
+      - name: Vitest 🔍
         run: pnpm run spec
   build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: ['lts/-1', 'lts/*', '*']
-    name: Build on node@${{ matrix.node }}
+        node: ["lts/-1", "lts/*"]
+    name: Build on node@v${{ matrix.node }}
     steps:
       - name: Checkout 🛎️
         uses: actions/checkout@v3
       - name: Setup pnpm 🔧
         uses: pnpm/action-setup@v2
         with:
-          version: latest
+          version: 7
       - name: Setup node 🔧
         uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node }}
           check-latest: true
-          cache: 'pnpm'
+          cache: "pnpm"
       - name: Install 🪄
         run: pnpm install --frozen-lockfile
-      - name: Generate schema 🪄
+      - name: Generate prisma schema 🪄
         run: pnpm prisma generate
       - name: Build 💎
         run: pnpm run build

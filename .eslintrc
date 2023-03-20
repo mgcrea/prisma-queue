@@ -1,9 +1,7 @@
 {
   "root": true,
-  "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended", "plugin:prettier/recommended", "prettier"],
-  "parser": "@typescript-eslint/parser",
-  "ignorePatterns": ["**/*.js"],
+  "extends": ["@mgcrea/node"],
   "rules": {
-    "@typescript-eslint/no-unused-vars": ["warn", {"argsIgnorePattern": "^_"}]
+    "testing-library/no-debugging-utils": 0
   }
 }
