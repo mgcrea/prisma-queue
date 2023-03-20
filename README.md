@@ -29,10 +29,9 @@
 Simple, reliable and efficient concurrent work queue for [Prisma](https://prisma.io) + [PostgreSQL](https://www.postgresql.org/)
 
 - Leverages PostgreSQL [SKIP LOCKED](https://www.2ndquadrant.com/en/blog/what-is-select-skip-locked-for-in-postgresql-9-5/) feature to reliably dequeue jobs
-
 - Supports [crontab](https://crontab.guru) syntax for complex scheduled jobs
-
-- Written in [TypeScript](https://www.typescriptlang.org/).
+- Written in [TypeScript](https://www.typescriptlang.org/) for static type checking with exported types along the library.
+- Built by [tsup](https://tsup.egoist.dev) to provide both CommonJS and ESM packages.
 
 ## Install
 
