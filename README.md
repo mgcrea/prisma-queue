@@ -1,24 +1,28 @@
-<!-- markdownlint-disable no-inline-html -->
+# Prisma Queue
 
-# prisma-queue
-
+<!-- markdownlint-disable MD033 -->
 <p align="center">
   <a href="https://www.npmjs.com/package/@mgcrea/prisma-queue">
     <img src="https://img.shields.io/npm/v/@mgcrea/prisma-queue.svg?style=for-the-badge" alt="npm version" />
   </a>
-  <!-- <a href="https://www.npmjs.com/package/@mgcrea/prisma-queue">
+  <a href="https://www.npmjs.com/package/@mgcrea/prisma-queue">
     <img src="https://img.shields.io/npm/dt/@mgcrea/prisma-queue.svg?style=for-the-badge" alt="npm total downloads" />
-  </a> -->
+  </a>
   <a href="https://www.npmjs.com/package/@mgcrea/prisma-queue">
     <img src="https://img.shields.io/npm/dm/@mgcrea/prisma-queue.svg?style=for-the-badge" alt="npm monthly downloads" />
   </a>
   <a href="https://www.npmjs.com/package/@mgcrea/prisma-queue">
     <img src="https://img.shields.io/npm/l/@mgcrea/prisma-queue.svg?style=for-the-badge" alt="npm license" />
   </a>
+  <br />
   <a href="https://github.com/mgcrea/prisma-queue/actions/workflows/main.yml">
-    <img src="https://img.shields.io/github/workflow/status/mgcrea/prisma-queue/main?style=for-the-badge" alt="github main workflow" />
+    <img src="https://img.shields.io/github/actions/workflow/status/mgcrea/prisma-queue/main.yml?style=for-the-badge&branch=master" alt="build status" />
+  </a>
+  <a href="https://depfu.com/github/mgcrea/prisma-queue">
+    <img src="https://img.shields.io/depfu/dependencies/github/mgcrea/prisma-queue?style=for-the-badge" alt="dependencies status" />
   </a>
 </p>
+<!-- markdownlint-enable MD037 -->
 
 ## Features
 
@@ -52,11 +56,11 @@ generator client {
 1. Create your queue
 
 ```ts
-type JobPayload = {email: string};
-type JobResult = {status: number};
+type JobPayload = { email: string };
+type JobResult = { status: number };
 
-export const emailQueue = createQueue<JobPayload, JobResult>({name: 'email'}, async (job, client) => {
-  const {id, payload} = job;
+export const emailQueue = createQueue<JobPayload, JobResult>({ name: "email" }, async (job, client) => {
+  const { id, payload } = job;
   console.log(`Processing job#${id} with payload=${JSON.stringify(payload)})`);
   // await someAsyncMethod();
   await job.progress(50);
@@ -65,17 +69,17 @@ export const emailQueue = createQueue<JobPayload, JobResult>({name: 'email'}, as
     throw new Error(`Failed for some unknown reason`);
   }
   console.log(`Finished job#${id} with status=${status}`);
-  return {status};
+  return { status };
 });
 ```
 
 - Queue a job
 
 ```ts
-import {emailQueue} from './emailQueue';
+import { emailQueue } from "./emailQueue";
 
 const main = async () => {
-  const job = await emailQueue.enqueue({email: 'foo@bar.com'});
+  const job = await emailQueue.enqueue({ email: "foo@bar.com" });
 };
 
 main();
@@ -84,10 +88,13 @@ main();
 - Schedule a recurring job
 
 ```ts
-import {emailQueue} from './emailQueue';
+import { emailQueue } from "./emailQueue";
 
 const main = async () => {
-  const nextJob = await queue.schedule({key: 'email-schedule', cron: '5 5 * * *'}, {email: 'foo@bar.com'});
+  const nextJob = await queue.schedule(
+    { key: "email-schedule", cron: "5 5 * * *" },
+    { email: "foo@bar.com" }
+  );
 };
 
 main();
@@ -96,7 +103,7 @@ main();
 - Start queue processing (usually in another process)
 
 ```ts
-import {emailQueue} from './emailQueue';
+import { emailQueue } from "./emailQueue";
 
 const main = async () => {
   await queue.start();
