@@ -174,11 +174,13 @@ export class PrismaQueue<
     const tableName = escape(tableNameRaw);
     const job = await this.#prisma.$transaction(
       async (client) => {
-        const prevTimeZone = await client.$queryRawUnsafe<string>("SHOW TIMEZONE");
+        const [{ TimeZone: prevTimeZone }] = await client.$queryRawUnsafe<[{ TimeZone: string }]>(
+          "SHOW TIME ZONE"
+        );
         const nextTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
         if (prevTimeZone !== nextTimeZone) {
           debug(`aligning database timezone from ${prevTimeZone} to ${nextTimeZone}!`);
-          await client.$queryRawUnsafe<string>(`SET TIMEZONE='${nextTimeZone}';`);
+          await client.$executeRawUnsafe(`SET LOCAL TIME ZONE '${nextTimeZone}';`);
         }
         const rows = await client.$queryRawUnsafe<DatabaseJob<T, U>[]>(
           `UPDATE ${tableName} SET "processedAt" = NOW(), "attempts" = "attempts" + 1

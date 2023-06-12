@@ -1,7 +1,5 @@
 {
   "root": true,
   "extends": ["@mgcrea/node"],
-  "rules": {
-    "testing-library/no-debugging-utils": 0
-  }
+  "rules": {}
 }
