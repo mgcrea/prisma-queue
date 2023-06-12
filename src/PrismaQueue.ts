@@ -4,7 +4,15 @@ import { EventEmitter } from "events";
 import assert from "node:assert";
 import { PrismaJob } from "./PrismaJob";
 import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker } from "./types";
-import { calculateDelay, debug, escape, getTableName, serializeError, waitFor } from "./utils";
+import {
+  calculateDelay,
+  debug,
+  escape,
+  getCurrentTimeZone,
+  getTableName,
+  serializeError,
+  waitFor,
+} from "./utils";
 
 export type PrismaQueueOptions = {
   prisma?: PrismaClient;
@@ -177,7 +185,7 @@ export class PrismaQueue<
         const [{ TimeZone: prevTimeZone }] = await client.$queryRawUnsafe<[{ TimeZone: string }]>(
           "SHOW TIME ZONE"
         );
-        const nextTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const nextTimeZone = getCurrentTimeZone();
         if (prevTimeZone !== nextTimeZone) {
           debug(`aligning database timezone from ${prevTimeZone} to ${nextTimeZone}!`);
           await client.$executeRawUnsafe(`SET LOCAL TIME ZONE '${nextTimeZone}';`);
