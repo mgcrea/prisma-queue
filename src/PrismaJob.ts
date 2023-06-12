@@ -14,7 +14,7 @@ export class PrismaJob<T, U> {
   constructor(record: DatabaseJob<T, U>, { prisma }: PrismaJobOptions) {
     this.#prisma = prisma;
     this.#record = record;
-    this.id = record.id;
+    this.id = record["id"];
   }
 
   #assign(record?: DatabaseJob<T, U>) {

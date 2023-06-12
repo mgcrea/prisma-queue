@@ -4,12 +4,12 @@ import { PrismaJob } from "src/PrismaJob";
 import { debug, serializeError } from "src/utils";
 import {
   createEmailQueue,
-  JobPayload,
-  JobResult,
   prisma,
   waitForNextEvent,
   waitForNextJob,
   waitForNthJob,
+  type JobPayload,
+  type JobResult,
 } from "test/utils";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -61,8 +61,8 @@ describe("PrismaQueue", () => {
       expect(job).toBeInstanceOf(PrismaJob);
       const record = await job.fetch();
       expect(record).toBeDefined();
-      expect(record?.runAt.getHours()).toEqual(5);
-      expect(record?.runAt.getMinutes()).toEqual(5);
+      expect(record?.runAt.getHours()).toBe(5);
+      expect(record?.runAt.getMinutes()).toBe(5);
     });
     it("should properly re-enqueue a recurring job", async () => {
       await queue.schedule(
@@ -72,25 +72,25 @@ describe("PrismaQueue", () => {
       queue.start();
       await waitForNextEvent(queue, "enqueue");
       const jobs = await prisma.queueJob.findMany({ where: { key: "email-schedule" } });
-      expect(jobs.length).toEqual(2);
+      expect(jobs.length).toBe(2);
       const record = jobs[1];
       expect(record).toBeDefined();
-      expect(record?.runAt.getHours()).toEqual(5);
-      expect(record?.runAt.getMinutes()).toEqual(5);
+      expect(record?.runAt.getHours()).toBe(5);
+      expect(record?.runAt.getMinutes()).toBe(5);
     });
     it("should properly upsert a recurring job", async () => {
       await queue.schedule({ key: "email-schedule", cron: "5 5 * * *" }, { email: "foo@bar.com" });
       await queue.schedule({ key: "email-schedule", cron: "5 5 * * *" }, { email: "baz@bar.com" });
       const jobs = await prisma.queueJob.findMany({ where: { key: "email-schedule" } });
-      expect(jobs.length).toEqual(1);
+      expect(jobs.length).toBe(1);
       expect(jobs[0]?.payload).toEqual({ email: "baz@bar.com" });
     });
     it("should properly upsert a recurring job with another schedule", async () => {
       await queue.schedule({ key: "email-schedule", cron: "5 5 * * *" }, { email: "foo@bar.com" });
       await queue.schedule({ key: "email-schedule", cron: "0 5 * * *" }, { email: "foo@bar.com" });
       const jobs = await prisma.queueJob.findMany({ where: { key: "email-schedule" } });
-      expect(jobs.length).toEqual(1);
-      expect(jobs[0]?.runAt.getMinutes()).toEqual(0);
+      expect(jobs.length).toBe(1);
+      expect(jobs[0]?.runAt.getMinutes()).toBe(0);
     });
   });
 
@@ -128,7 +128,7 @@ describe("PrismaQueue", () => {
       expect(queue.worker).toHaveBeenCalledTimes(1);
       expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), expect.any(PrismaClient));
       const record = await job.fetch();
-      expect(record?.finishedAt).toBe(null);
+      expect(record?.finishedAt).toBeNull();
       expect(record?.error).toEqual(serializeError(error));
     });
     afterAll(() => {
@@ -199,7 +199,7 @@ describe("PrismaQueue", () => {
       queue.start();
       await waitForNextJob(queue);
       const record = await job.fetch();
-      expect(record?.progress).toEqual(50);
+      expect(record?.progress).toBe(50);
     });
     afterAll(() => {
       queue.stop();

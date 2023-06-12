@@ -1,7 +1,7 @@
 import { Prisma, PrismaClient } from "@prisma/client";
-import assert from "assert";
 import Cron from "croner";
 import { EventEmitter } from "events";
+import assert from "node:assert";
 import { PrismaJob } from "./PrismaJob";
 import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker } from "./types";
 import { calculateDelay, debug, escape, getTableName, serializeError, waitFor } from "./utils";
@@ -85,7 +85,7 @@ export class PrismaQueue<
     payloadOrFunction: T | JobCreator<T>,
     options: EnqueueOptions = {}
   ): Promise<PrismaJob<T, U>> {
-    debug(`enqueue`, payloadOrFunction);
+    debug(`enqueue`, payloadOrFunction, options);
     const { name: queueName } = this;
     const { key, cron = null, maxAttempts = null, priority = 0, runAt } = options;
     const record = await this.#prisma.$transaction(async (client) => {
@@ -125,7 +125,7 @@ export class PrismaQueue<
   ): Promise<PrismaJob<T, U>> {
     debug(`schedule`, options);
     const { key, cron, runAt: firstRunAt, ...otherOptions } = options;
-    const runAt = firstRunAt || Cron(cron).next();
+    const runAt = firstRunAt || Cron(cron).nextRun();
     assert(runAt, `Failed to find a future occurence for given cron`);
     return this.enqueue(payloadOrFunction, { key, cron, runAt, ...otherOptions });
   }
@@ -174,6 +174,12 @@ export class PrismaQueue<
     const tableName = escape(tableNameRaw);
     const job = await this.#prisma.$transaction(
       async (client) => {
+        const prevTimeZone = await client.$queryRawUnsafe<string>("SHOW TIMEZONE");
+        const nextTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (prevTimeZone !== nextTimeZone) {
+          debug(`aligning database timezone from ${prevTimeZone} to ${nextTimeZone}!`);
+          await client.$queryRawUnsafe<string>(`SET TIMEZONE='${nextTimeZone}';`);
+        }
         const rows = await client.$queryRawUnsafe<DatabaseJob<T, U>[]>(
           `UPDATE ${tableName} SET "processedAt" = NOW(), "attempts" = "attempts" + 1
            WHERE id = (
@@ -195,7 +201,7 @@ export class PrismaQueue<
           return null;
         }
         const { id, payload, attempts, maxAttempts } = rows[0];
-        const job = new PrismaJob(rows[0], { prisma: client });
+        const job = new PrismaJob<T, U>(rows[0], { prisma: client });
         let result;
         try {
           assert(this.worker, "Missing queue worker to process job");

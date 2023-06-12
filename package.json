@@ -29,7 +29,7 @@
     "worker"
   ],
   "scripts": {
-    "start": "vitest",
+    "start": "DEBUG=prisma-queue,prisma-query vitest",
     "build": "tsup --entry src/index.ts --format cjs,esm --sourcemap --dts --clean --entry src/bin/cli.ts",
     "lint": "eslint src/ test/",
     "prettycheck": "prettier --check src/ test/",
@@ -40,27 +40,28 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "croner": "^5.3.0",
+    "croner": "^6.0.3",
     "debug": "^4.3.4"
   },
   "peerDependencies": {
     "@prisma/client": ">=3"
   },
   "devDependencies": {
-    "@mgcrea/eslint-config-node": "^0.2.3",
-    "@mgcrea/fastify-session": "^1.1.0",
-    "@prisma/client": "^4.11.0",
-    "@tsconfig/node-lts-strictest-esm": "^18.12.1",
-    "@types/debug": "^4.1.7",
-    "@types/node": "^18.15.3",
-    "eslint": "^8.36.0",
-    "prettier": "^2.8.5",
+    "@mgcrea/eslint-config-node": "^0.6.1",
+    "@prisma/client": "^4.15.0",
+    "@tsconfig/esm": "^1.0.3",
+    "@tsconfig/node-lts": "^18.12.2",
+    "@tsconfig/strictest": "^2.0.1",
+    "@types/debug": "^4.1.8",
+    "@types/node": "^18.16.17",
+    "eslint": "^8.42.0",
+    "prettier": "^2.8.8",
     "prettier-plugin-organize-imports": "^3.2.2",
-    "prisma": "^4.11.0",
+    "prisma": "^4.15.0",
     "tsup": "^6.7.0",
-    "tsx": "^3.12.5",
-    "typescript": "^5.0.2",
-    "vite-tsconfig-paths": "^4.0.7",
-    "vitest": "^0.29.3"
+    "tsx": "^3.12.7",
+    "typescript": "^5.1.3",
+    "vite-tsconfig-paths": "^4.2.0",
+    "vitest": "^0.32.0"
   }
 }

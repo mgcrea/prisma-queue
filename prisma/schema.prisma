@@ -3,7 +3,8 @@
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["interactiveTransactions"]
+  output          = "../node_modules/.prisma/client"
+  previewFeatures = []
 }
 
 datasource db {

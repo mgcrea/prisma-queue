@@ -1,13 +1,17 @@
 {
-  "extends": "@tsconfig/node-lts-strictest-esm/tsconfig.json",
+  "extends": [
+    "@tsconfig/node-lts/tsconfig.json",
+    "@tsconfig/strictest/tsconfig.json",
+    "@tsconfig/esm/tsconfig.json"
+  ],
   "compilerOptions": {
+    "exactOptionalPropertyTypes": false,
     "baseUrl": ".",
     "outDir": "dist",
     "paths": {
       "src/*": ["./src/*"],
       "test/*": ["./test/*"]
-    },
-    "ignoreDeprecations": "5.0"
+    }
   },
   "include": ["src", "test"]
 }

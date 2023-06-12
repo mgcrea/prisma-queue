@@ -1,4 +1,4 @@
-import { PrismaQueue, PrismaQueueOptions } from "./PrismaQueue";
+import { PrismaQueue, type PrismaQueueOptions } from "./PrismaQueue";
 import type { JobPayload, JobResult, JobWorker } from "./types";
 
 export * from "./PrismaJob";
