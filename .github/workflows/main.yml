@@ -51,6 +51,8 @@ jobs:
         run: pnpm run lint
       - name: Prettier 🔍
         run: pnpm run prettycheck
+      - name: Debug 🔍
+        run: ls -l node_modules
       - name: TypeScript 🔍
         run: pnpm run typecheck
       - name: Vitest 🔍
