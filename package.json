@@ -36,6 +36,7 @@
     "prettify": "prettier --write src/ test/",
     "typecheck": "tsc --noEmit",
     "spec": "DEBUG=prisma-queue,prisma-query vitest --run",
+    "dev": "DEBUG=prisma-queue,prisma-query vitest --watch",
     "test": "npm run lint && npm run prettycheck && npm run typecheck && npm run spec",
     "prepublishOnly": "npm run build"
   },

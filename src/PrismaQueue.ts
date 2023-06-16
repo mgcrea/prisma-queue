@@ -21,6 +21,7 @@ export type PrismaQueueOptions = {
   pollInterval?: number;
   jobInterval?: number;
   tableName?: string;
+  deleteOn?: "success" | "failure" | "always" | "never";
 };
 
 export type EnqueueOptions = {
@@ -38,6 +39,7 @@ export type ScheduleOptions = Omit<EnqueueOptions, "key" | "cron"> & {
 const DEFAULT_MAX_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 10 * 1000;
 const DEFAULT_JOB_INTERVAL = 25;
+const DEFAULT_DELETE_ON = "never";
 
 export class PrismaQueue<
   T extends JobPayload = JobPayload,
@@ -60,6 +62,7 @@ export class PrismaQueue<
       maxConcurrency = DEFAULT_MAX_CONCURRENCY,
       pollInterval = DEFAULT_POLL_INTERVAL,
       jobInterval = DEFAULT_JOB_INTERVAL,
+      deleteOn = DEFAULT_DELETE_ON,
     } = this.options;
 
     assert(name.length <= 255, "name must be less or equal to 255 chars");
@@ -73,6 +76,7 @@ export class PrismaQueue<
       maxConcurrency,
       pollInterval,
       jobInterval,
+      deleteOn,
     };
   }
 
@@ -142,7 +146,7 @@ export class PrismaQueue<
 
   private async poll(): Promise<void> {
     debug(`poll`, this.name);
-    const { maxConcurrency, pollInterval } = this.config;
+    const { maxConcurrency, pollInterval, jobInterval } = this.config;
 
     while (!this.stopped) {
       let estimatedQueueSize = await this.size();
@@ -160,7 +164,7 @@ export class PrismaQueue<
             .catch((err) => this.emit("error", err))
             .finally(() => this.concurrency--)
         );
-        await waitFor(JOB_INTERVAL);
+        await waitFor(jobInterval);
       }
 
       await waitFor(pollInterval);
@@ -176,7 +180,7 @@ export class PrismaQueue<
     }
     debug(`dequeue`, this.name);
     const { name: queueName } = this;
-    const { tableName: tableNameRaw } = this.config;
+    const { tableName: tableNameRaw, deleteOn } = this.config;
     const tableName = escape(tableNameRaw);
     const job = await this.#prisma.$transaction(
       async (client) => {
@@ -218,6 +222,9 @@ export class PrismaQueue<
           const date = new Date();
           await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });
           this.emit("job:success", job);
+          if (deleteOn === "success" || deleteOn === "always") {
+            await job.delete();
+          }
         } catch (err) {
           const date = new Date();
           debug(`failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${err}"`);
@@ -233,6 +240,9 @@ export class PrismaQueue<
             notBefore,
           });
           this.emit("job:error", job);
+          if (deleteOn === "failure" || deleteOn === "always") {
+            await job.delete();
+          }
         }
         return job;
       },

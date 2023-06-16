@@ -1,4 +1,4 @@
-import { PrismaJob, PrismaQueue, createQueue } from "src/index";
+import { PrismaJob, PrismaQueue, createQueue, type PrismaQueueOptions } from "src/index";
 import type { JobWorker } from "src/types";
 import { prisma } from "./client";
 
@@ -7,10 +7,11 @@ export type JobResult = { code: string };
 
 const pollInterval = 500;
 export const createEmailQueue = (
+  options: PrismaQueueOptions = {},
   worker: JobWorker<JobPayload, JobResult> = async (_job) => {
     return { code: "200" };
   }
-) => createQueue<JobPayload, JobResult>({ prisma, pollInterval }, worker);
+) => createQueue<JobPayload, JobResult>({ prisma, pollInterval, ...options }, worker);
 
 export const waitForNextJob = (queue: PrismaQueue<JobPayload, JobResult>) =>
   waitForNextEvent(queue, "dequeue");

@@ -59,4 +59,11 @@ export class PrismaJob<T, U> {
     this.#assign(record);
     return record;
   }
+
+  public async delete() {
+    const record = (await this.#prisma.queueJob.delete({
+      where: { id: this.id },
+    })) as DatabaseJob<T, U>;
+    return record;
+  }
 }

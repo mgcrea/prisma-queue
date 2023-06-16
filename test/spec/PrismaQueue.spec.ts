@@ -136,6 +136,99 @@ describe("PrismaQueue", () => {
     });
   });
 
+  describe.only("deleteOn", () => {
+    let queue: PrismaQueue<JobPayload, JobResult>;
+    describe("success", () => {
+      beforeAll(async () => {
+        queue = createEmailQueue({ deleteOn: "success" });
+      });
+      beforeEach(async () => {
+        await prisma.queueJob.deleteMany();
+        queue.start();
+      });
+      afterEach(async () => {
+        queue.stop();
+      });
+      it("should properly dequeue a successful job", async () => {
+        queue.worker = vi.fn(async (_job) => {
+          return { code: "200" };
+        });
+        const job = await queue.enqueue({ email: "foo@bar.com" });
+        await waitForNextJob(queue);
+        expect(queue.worker).toHaveBeenCalledTimes(1);
+        const record = await job.fetch();
+        expect(record).toBeNull();
+      });
+      afterAll(() => {
+        queue.stop();
+      });
+    });
+    describe("failure", () => {
+      beforeAll(async () => {
+        queue = createEmailQueue({ deleteOn: "failure" });
+      });
+      beforeEach(async () => {
+        await prisma.queueJob.deleteMany();
+        queue.start();
+      });
+      afterEach(async () => {
+        queue.stop();
+      });
+      it("should properly dequeue a failed job", async () => {
+        let error: Error | null = null;
+        queue.worker = vi.fn(async (_job) => {
+          error = new Error("failed");
+          throw error;
+        });
+        const job = await queue.enqueue({ email: "foo@bar.com" });
+        await waitForNextJob(queue);
+        expect(queue.worker).toHaveBeenCalledTimes(1);
+        const record = await job.fetch();
+        expect(record).toBeNull();
+      });
+      afterAll(() => {
+        queue.stop();
+      });
+    });
+    describe("always", () => {
+      beforeAll(async () => {
+        queue = createEmailQueue({ deleteOn: "always" });
+      });
+      beforeEach(async () => {
+        await prisma.queueJob.deleteMany();
+        queue.start();
+      });
+      afterEach(async () => {
+        queue.stop();
+      });
+      it("should properly dequeue a successful job", async () => {
+        queue.worker = vi.fn(async (_job) => {
+          return { code: "200" };
+        });
+        const job = await queue.enqueue({ email: "foo@bar.com" });
+        await waitForNextJob(queue);
+        expect(queue.worker).toHaveBeenCalledTimes(1);
+        const record = await job.fetch();
+        expect(record).toBeNull();
+      });
+      it("should properly dequeue a failed job", async () => {
+        let error: Error | null = null;
+        queue.worker = vi.fn(async (_job) => {
+          error = new Error("failed");
+          throw error;
+        });
+        const job = await queue.enqueue({ email: "foo@bar.com" });
+        await waitForNextJob(queue);
+        expect(queue.worker).toHaveBeenCalledTimes(1);
+        const record = await job.fetch();
+        expect(record).toBeNull();
+      });
+      afterAll(() => {
+        queue.stop();
+      });
+    });
+  });
+
   describe("priority", () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
     beforeAll(async () => {
