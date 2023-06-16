@@ -22,6 +22,7 @@ export type PrismaQueueOptions = {
   jobInterval?: number;
   tableName?: string;
   deleteOn?: "success" | "failure" | "always" | "never";
+  alignTimeZone?: boolean;
 };
 
 export type EnqueueOptions = {
@@ -63,6 +64,7 @@ export class PrismaQueue<
       pollInterval = DEFAULT_POLL_INTERVAL,
       jobInterval = DEFAULT_JOB_INTERVAL,
       deleteOn = DEFAULT_DELETE_ON,
+      alignTimeZone = false,
     } = this.options;
 
     assert(name.length <= 255, "name must be less or equal to 255 chars");
@@ -77,6 +79,7 @@ export class PrismaQueue<
       pollInterval,
       jobInterval,
       deleteOn,
+      alignTimeZone,
     };
   }
 
@@ -180,17 +183,19 @@ export class PrismaQueue<
     }
     debug(`dequeue`, this.name);
     const { name: queueName } = this;
-    const { tableName: tableNameRaw, deleteOn } = this.config;
+    const { tableName: tableNameRaw, deleteOn, alignTimeZone } = this.config;
     const tableName = escape(tableNameRaw);
     const job = await this.#prisma.$transaction(
       async (client) => {
-        const [{ TimeZone: dbTimeZone }] = await client.$queryRawUnsafe<[{ TimeZone: string }]>(
-          "SHOW TIME ZONE"
-        );
-        const localTimeZone = getCurrentTimeZone();
-        if (dbTimeZone !== localTimeZone) {
-          debug(`aligning database timezone from ${dbTimeZone} to ${localTimeZone}!`);
-          await client.$executeRawUnsafe(`SET LOCAL TIME ZONE '${localTimeZone}';`);
+        if (alignTimeZone) {
+          const [{ TimeZone: dbTimeZone }] = await client.$queryRawUnsafe<[{ TimeZone: string }]>(
+            "SHOW TIME ZONE"
+          );
+          const localTimeZone = getCurrentTimeZone();
+          if (dbTimeZone !== localTimeZone) {
+            debug(`aligning database timezone from ${dbTimeZone} to ${localTimeZone}!`);
+            await client.$executeRawUnsafe(`SET LOCAL TIME ZONE '${localTimeZone}';`);
+          }
         }
         const rows = await client.$queryRawUnsafe<DatabaseJob<T, U>[]>(
           `UPDATE ${tableName} SET "processedAt" = NOW(), "attempts" = "attempts" + 1
