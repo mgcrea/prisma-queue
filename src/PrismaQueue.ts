@@ -139,13 +139,12 @@ export class PrismaQueue<
   }
 
   private async poll(): Promise<void> {
-    if (this.stopped) {
-      return;
-    }
     debug(`poll`, this.name);
     const { maxConcurrency, pollInterval } = this.config;
-    let estimatedQueueSize = await this.size();
-    while (estimatedQueueSize > 0) {
+
+    while (!this.stopped) {
+      let estimatedQueueSize = await this.size();
+
       while (estimatedQueueSize > 0 && this.concurrency < maxConcurrency) {
         estimatedQueueSize--;
         this.concurrency++;
@@ -159,14 +158,11 @@ export class PrismaQueue<
             .catch((err) => this.emit("error", err))
             .finally(() => this.concurrency--)
         );
+        await waitFor(JOB_INTERVAL);
       }
 
-      await waitFor(JOB_INTERVAL);
+      await waitFor(pollInterval);
     }
-
-    await waitFor(pollInterval);
-
-    await this.poll();
   }
 
   // https://www.2ndquadrant.com/en/blog/what-is-select-skip-locked-for-in-postgresql-9-5/
