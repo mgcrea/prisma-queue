@@ -19,7 +19,7 @@ export type PrismaQueueOptions = {
   name?: string;
   maxConcurrency?: number;
   pollInterval?: number;
-  // jobInterval?: number;
+  jobInterval?: number;
   tableName?: string;
 };
 
@@ -35,7 +35,9 @@ export type ScheduleOptions = Omit<EnqueueOptions, "key" | "cron"> & {
   cron: string;
 };
 
-const JOB_INTERVAL = 25;
+const DEFAULT_MAX_CONCURRENCY = 1;
+const DEFAULT_POLL_INTERVAL = 10 * 1000;
+const DEFAULT_JOB_INTERVAL = 25;
 
 export class PrismaQueue<
   T extends JobPayload = JobPayload,
@@ -55,14 +57,14 @@ export class PrismaQueue<
       prisma = new PrismaClient(),
       name = "default",
       tableName = getTableName("QueueJob"),
-      maxConcurrency = 1,
-      pollInterval = 10000,
-      // jobInterval = 100,
+      maxConcurrency = DEFAULT_MAX_CONCURRENCY,
+      pollInterval = DEFAULT_POLL_INTERVAL,
+      jobInterval = DEFAULT_JOB_INTERVAL,
     } = this.options;
 
     assert(name.length <= 255, "name must be less or equal to 255 chars");
     assert(pollInterval >= 100, "pollInterval must be more than 100 ms");
-    // assert(jobInterval >= 10, 'jobInterval must be more than 10 ms');
+    assert(jobInterval >= 10, "jobInterval must be more than 10 ms");
 
     this.name = name;
     this.#prisma = prisma;
@@ -70,7 +72,7 @@ export class PrismaQueue<
       tableName,
       maxConcurrency,
       pollInterval,
-      // jobInterval,
+      jobInterval,
     };
   }
 
