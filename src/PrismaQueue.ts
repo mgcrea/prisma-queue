@@ -79,13 +79,13 @@ export class PrismaQueue<
   }
 
   public async start(): Promise<void> {
-    debug(`start`);
+    debug(`start`, this.name);
     this.stopped = false;
     return this.poll();
   }
 
   public async stop(): Promise<void> {
-    debug(`stop`);
+    debug(`stop`, this.name);
     this.stopped = true;
   }
 
@@ -93,7 +93,7 @@ export class PrismaQueue<
     payloadOrFunction: T | JobCreator<T>,
     options: EnqueueOptions = {}
   ): Promise<PrismaJob<T, U>> {
-    debug(`enqueue`, payloadOrFunction, options);
+    debug(`enqueue`, this.name, payloadOrFunction, options);
     const { name: queueName } = this;
     const { key, cron = null, maxAttempts = null, priority = 0, runAt } = options;
     const record = await this.#prisma.$transaction(async (client) => {
@@ -131,7 +131,7 @@ export class PrismaQueue<
     options: ScheduleOptions,
     payloadOrFunction: T | JobCreator<T>
   ): Promise<PrismaJob<T, U>> {
-    debug(`schedule`, options);
+    debug(`schedule`, this.name, options, payloadOrFunction);
     const { key, cron, runAt: firstRunAt, ...otherOptions } = options;
     const runAt = firstRunAt || Cron(cron).nextRun();
     assert(runAt, `Failed to find a future occurence for given cron`);
@@ -142,7 +142,7 @@ export class PrismaQueue<
     if (this.stopped) {
       return;
     }
-    debug(`poll`);
+    debug(`poll`, this.name);
     const { maxConcurrency, pollInterval } = this.config;
     let estimatedQueueSize = await this.size();
     while (estimatedQueueSize > 0) {
@@ -176,7 +176,7 @@ export class PrismaQueue<
     if (this.stopped) {
       return null;
     }
-    debug(`dequeue`);
+    debug(`dequeue`, this.name);
     const { name: queueName } = this;
     const { tableName: tableNameRaw } = this.config;
     const tableName = escape(tableNameRaw);
