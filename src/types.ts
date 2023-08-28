@@ -13,5 +13,5 @@ export type JobWorker<T extends JobPayload = JobPayload, U extends JobResult = J
 
 export type PrismaLightClient = Omit<
   PrismaClient,
-  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use"
+  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
 >;
