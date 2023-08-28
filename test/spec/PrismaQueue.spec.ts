@@ -56,7 +56,7 @@ describe("PrismaQueue", () => {
     it("should properly schedule a recurring job", async () => {
       const job = await queue.schedule(
         { key: "email-schedule", cron: "5 5 * * *" },
-        { email: "foo@bar.com" }
+        { email: "foo@bar.com" },
       );
       expect(job).toBeInstanceOf(PrismaJob);
       const record = await job.fetch();
@@ -67,7 +67,7 @@ describe("PrismaQueue", () => {
     it("should properly re-enqueue a recurring job", async () => {
       await queue.schedule(
         { key: "email-schedule", cron: "5 5 * * *", runAt: new Date() },
-        { email: "foo@bar.com" }
+        { email: "foo@bar.com" },
       );
       queue.start();
       await waitForNextEvent(queue, "enqueue");
@@ -255,14 +255,14 @@ describe("PrismaQueue", () => {
         expect.objectContaining({
           payload: { email: "baz@bar.com" },
         }),
-        expect.any(PrismaClient)
+        expect.any(PrismaClient),
       );
       expect(queue.worker).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
           payload: { email: "foo@bar.com" },
         }),
-        expect.any(PrismaClient)
+        expect.any(PrismaClient),
       );
     });
     afterAll(() => {

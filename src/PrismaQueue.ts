@@ -44,7 +44,7 @@ const DEFAULT_DELETE_ON = "never";
 
 export class PrismaQueue<
   T extends JobPayload = JobPayload,
-  U extends JobResult = JobResult
+  U extends JobResult = JobResult,
 > extends EventEmitter {
   #prisma: PrismaClient;
   private name: string;
@@ -53,7 +53,10 @@ export class PrismaQueue<
   private concurrency = 0;
   private stopped = true;
 
-  public constructor(private options: PrismaQueueOptions = {}, public worker?: JobWorker<T, U>) {
+  public constructor(
+    private options: PrismaQueueOptions = {},
+    public worker?: JobWorker<T, U>,
+  ) {
     super();
 
     const {
@@ -100,7 +103,7 @@ export class PrismaQueue<
 
   public async enqueue(
     payloadOrFunction: T | JobCreator<T>,
-    options: EnqueueOptions = {}
+    options: EnqueueOptions = {},
   ): Promise<PrismaJob<T, U>> {
     debug(`enqueue`, this.name, payloadOrFunction, options);
     const { name: queueName } = this;
@@ -138,7 +141,7 @@ export class PrismaQueue<
 
   public async schedule(
     options: ScheduleOptions,
-    payloadOrFunction: T | JobCreator<T>
+    payloadOrFunction: T | JobCreator<T>,
   ): Promise<PrismaJob<T, U>> {
     debug(`schedule`, this.name, options, payloadOrFunction);
     const { key, cron, runAt: firstRunAt, ...otherOptions } = options;
@@ -165,7 +168,7 @@ export class PrismaQueue<
               }
             })
             .catch((err) => this.emit("error", err))
-            .finally(() => this.concurrency--)
+            .finally(() => this.concurrency--),
         );
         await waitFor(jobInterval);
       }
@@ -188,9 +191,8 @@ export class PrismaQueue<
     const job = await this.#prisma.$transaction(
       async (client) => {
         if (alignTimeZone) {
-          const [{ TimeZone: dbTimeZone }] = await client.$queryRawUnsafe<[{ TimeZone: string }]>(
-            "SHOW TIME ZONE"
-          );
+          const [{ TimeZone: dbTimeZone }] =
+            await client.$queryRawUnsafe<[{ TimeZone: string }]>("SHOW TIME ZONE");
           const localTimeZone = getCurrentTimeZone();
           if (dbTimeZone !== localTimeZone) {
             debug(`aligning database timezone from ${dbTimeZone} to ${localTimeZone}!`);
@@ -211,7 +213,7 @@ export class PrismaQueue<
              LIMIT 1
            )
            RETURNING *;`,
-          queueName
+          queueName,
         );
         if (!rows.length || !rows[0]) {
           // @NOTE Failed to acquire a lock
@@ -252,7 +254,7 @@ export class PrismaQueue<
         return job;
       },
       // @NOTE https://github.com/prisma/prisma/issues/11565#issuecomment-1031380271
-      { timeout: 864e5 }
+      { timeout: 864e5 },
     );
     if (job) {
       this.emit("dequeue", job);

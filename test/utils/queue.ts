@@ -10,7 +10,7 @@ export const createEmailQueue = (
   options: PrismaQueueOptions = {},
   worker: JobWorker<JobPayload, JobResult> = async (_job) => {
     return { code: "200" };
-  }
+  },
 ) => createQueue<JobPayload, JobResult>({ prisma, pollInterval, ...options }, worker);
 
 export const waitForNextJob = (queue: PrismaQueue<JobPayload, JobResult>) =>
@@ -18,7 +18,7 @@ export const waitForNextJob = (queue: PrismaQueue<JobPayload, JobResult>) =>
 
 export const waitForNthJob = <T extends JobPayload, U extends JobResult>(
   queue: PrismaQueue<T, U>,
-  nth: number
+  nth: number,
 ) => waitForNthEvent(queue, "dequeue", nth);
 
 export const waitForNextEvent = (queue: PrismaQueue<JobPayload, JobResult>, eventName: string) =>
@@ -31,7 +31,7 @@ export const waitForNextEvent = (queue: PrismaQueue<JobPayload, JobResult>, even
 export const waitForNthEvent = <T extends JobPayload, U extends JobResult>(
   queue: PrismaQueue<T, U>,
   eventName: string,
-  nth = 1
+  nth = 1,
 ) =>
   new Promise((resolve) => {
     let count = 0;

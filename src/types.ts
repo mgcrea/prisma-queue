@@ -8,7 +8,7 @@ export type DatabaseJob<T, U> = Omit<PrismaQueueJob, "payload" | "result"> & { p
 export type JobCreator<T extends JobPayload> = (client: PrismaLightClient) => Promise<T>;
 export type JobWorker<T extends JobPayload = JobPayload, U extends JobResult = JobResult> = (
   job: PrismaJob<T, U>,
-  client: PrismaClient
+  client: PrismaClient,
 ) => Promise<U>;
 
 export type PrismaLightClient = Omit<
