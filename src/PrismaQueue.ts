@@ -244,7 +244,7 @@ export class PrismaQueue<
             finishedAt: isFinished ? date : null,
             failedAt: date,
             error: serializeError(err),
-            notBefore,
+            notBefore: isFinished ? null : notBefore,
           });
           this.emit("job:error", job);
           if (deleteOn === "failure" || deleteOn === "always") {
