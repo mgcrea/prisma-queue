@@ -38,6 +38,9 @@ export class PrismaJob<T, U> {
   public get finishedAt() {
     return this.#record.finishedAt;
   }
+  public get error() {
+    return this.#record.error;
+  }
 
   public async progress(progress: number) {
     return await this.update({ progress: Math.max(0, Math.min(100, progress)) });
