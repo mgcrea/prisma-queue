@@ -17,7 +17,19 @@ describe("PrismaQueue", () => {
   it("should properly create a queue", () => {
     const emailQueue = createEmailQueue();
     expect(emailQueue).toBeDefined();
-    expect(Object.keys(emailQueue)).toMatchSnapshot();
+    expect(Object.keys(emailQueue)).toMatchInlineSnapshot(`
+      [
+        "_events",
+        "_eventsCount",
+        "_maxListeners",
+        "name",
+        "config",
+        "concurrency",
+        "stopped",
+        "options",
+        "worker",
+      ]
+    `);
   });
   describe("enqueue", () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
@@ -34,7 +46,11 @@ describe("PrismaQueue", () => {
     it("should properly enqueue a job", async () => {
       const job = await queue.enqueue({ email: "foo@bar.com" });
       expect(job).toBeInstanceOf(PrismaJob);
-      expect(Object.keys(job)).toMatchSnapshot();
+      expect(Object.keys(job)).toMatchInlineSnapshot(`
+        [
+          "id",
+        ]
+      `);
       const record = await job.fetch();
       expect(record?.payload).toEqual({ email: "foo@bar.com" });
       expect(record?.runAt).toBeInstanceOf(Date);
@@ -136,7 +152,7 @@ describe("PrismaQueue", () => {
     });
   });
 
-  describe.only("deleteOn", () => {
+  describe("deleteOn", () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
     describe("success", () => {
       beforeAll(async () => {

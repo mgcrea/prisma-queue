@@ -48,7 +48,7 @@
     "@prisma/client": ">=3"
   },
   "devDependencies": {
-    "@mgcrea/eslint-config-node": "^0.7.0",
+    "@mgcrea/eslint-config-node": "^0.8.0",
     "@prisma/client": "^5.2.0",
     "@tsconfig/esm": "^1.0.4",
     "@tsconfig/node-lts": "^18.12.5",
@@ -56,7 +56,7 @@
     "@types/debug": "^4.1.8",
     "@types/node": "^20.5.7",
     "eslint": "^8.48.0",
-    "prettier": "^3.0.2",
+    "prettier": "^3.0.3",
     "prettier-plugin-organize-imports": "^3.2.3",
     "prisma": "^5.2.0",
     "tsup": "^7.2.0",
