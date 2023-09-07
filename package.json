@@ -4,6 +4,7 @@
   "author": "Olivier Louvignes <olivier@mgcrea.io>",
   "repository": "github:mgcrea/fastify-session-prisma-store",
   "license": "MIT",
+  "type": "module",
   "exports": {
     ".": {
       "require": "./dist/index.cjs",
