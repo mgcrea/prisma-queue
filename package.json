@@ -40,27 +40,27 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "croner": "^7.0.1",
+    "croner": "^8.0.0",
     "debug": "^4.3.4"
   },
   "peerDependencies": {
     "@prisma/client": ">=3"
   },
   "devDependencies": {
-    "@mgcrea/eslint-config-node": "^0.8.0",
-    "@prisma/client": "^5.2.0",
-    "@tsconfig/node-lts": "^18.12.5",
-    "@tsconfig/strictest": "^2.0.1",
-    "@types/debug": "^4.1.8",
-    "@types/node": "^20.5.7",
-    "eslint": "^8.48.0",
-    "prettier": "^3.0.3",
-    "prettier-plugin-organize-imports": "^3.2.3",
-    "prisma": "^5.2.0",
-    "tsup": "^7.2.0",
-    "tsx": "^3.12.7",
-    "typescript": "^5.2.2",
-    "vite-tsconfig-paths": "^4.2.0",
-    "vitest": "^0.34.3"
+    "@mgcrea/eslint-config-node": "^0.9.4",
+    "@prisma/client": "^5.7.1",
+    "@tsconfig/node-lts": "^20.1.0",
+    "@tsconfig/strictest": "^2.0.2",
+    "@types/debug": "^4.1.12",
+    "@types/node": "^20.10.5",
+    "eslint": "^8.56.0",
+    "prettier": "^3.1.1",
+    "prettier-plugin-organize-imports": "^3.2.4",
+    "prisma": "^5.7.1",
+    "tsup": "^8.0.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vite-tsconfig-paths": "^4.2.2",
+    "vitest": "^1.1.0"
   }
 }
