@@ -91,8 +91,8 @@ export class PrismaQueue<
   }
 
   private get model(): Prisma.QueueJobDelegate {
-    const queueJob = uncapitalize(this.config.modelName) as "queueJob";
-    return this.#prisma[queueJob];
+    const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
+    return this.#prisma[queueJobKey];
   }
 
   public async start(): Promise<void> {
@@ -139,7 +139,7 @@ export class PrismaQueue<
       }
       return await this.model.create({ data });
     });
-    const job = new PrismaJob(record as DatabaseJob<T, U>, { prisma: this.#prisma });
+    const job = new PrismaJob(record as DatabaseJob<T, U>, { model: this.model });
     this.emit("enqueue", job);
     return job;
   }
@@ -193,6 +193,7 @@ export class PrismaQueue<
     const { name: queueName } = this;
     const { tableName: tableNameRaw, deleteOn, alignTimeZone } = this.config;
     const tableName = escape(tableNameRaw);
+    const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
     const job = await this.#prisma.$transaction(
       async (client) => {
         if (alignTimeZone) {
@@ -225,7 +226,7 @@ export class PrismaQueue<
           return null;
         }
         const { id, payload, attempts, maxAttempts } = rows[0];
-        const job = new PrismaJob<T, U>(rows[0], { prisma: client });
+        const job = new PrismaJob<T, U>(rows[0], { model: client[queueJobKey] });
         let result;
         try {
           assert(this.worker, "Missing queue worker to process job");
