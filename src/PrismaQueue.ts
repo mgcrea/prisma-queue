@@ -34,16 +34,33 @@ export type EnqueueOptions = {
   maxAttempts?: number;
   priority?: number;
 };
+
 export type ScheduleOptions = Omit<EnqueueOptions, "key" | "cron"> & {
   key: string;
   cron: string;
 };
+
+export type PrismaQueueEvents<T extends JobPayload = JobPayload, U extends JobResult = JobResult> = {
+  enqueue: (job: PrismaJob<T, U>) => void;
+  dequeue: (job: PrismaJob<T, U>) => void;
+  success: (result: U, job: PrismaJob<T, U>) => void;
+  error: (error: unknown, job?: PrismaJob<T, U>) => void;
+};
+
+export interface PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult = JobResult> {
+  on<E extends keyof PrismaQueueEvents<T, U>>(event: E, listener: PrismaQueueEvents<T, U>[E]): this;
+  emit<E extends keyof PrismaQueueEvents<T, U>>(
+    event: E,
+    ...args: Parameters<PrismaQueueEvents<T, U>[E]>
+  ): boolean;
+}
 
 const DEFAULT_MAX_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 10 * 1000;
 const DEFAULT_JOB_INTERVAL = 25;
 const DEFAULT_DELETE_ON = "never";
 
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class PrismaQueue<
   T extends JobPayload = JobPayload,
   U extends JobResult = JobResult,
@@ -172,7 +189,7 @@ export class PrismaQueue<
                 estimatedQueueSize = 0;
               }
             })
-            .catch((err) => this.emit("error", err))
+            .catch((error) => this.emit("error", error))
             .finally(() => this.concurrency--),
         );
         await waitFor(jobInterval);
@@ -234,13 +251,15 @@ export class PrismaQueue<
           result = await this.worker(job, this.#prisma);
           const date = new Date();
           await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });
-          this.emit("job:success", job);
+          this.emit("success", result, job);
           if (deleteOn === "success" || deleteOn === "always") {
             await job.delete();
           }
-        } catch (err) {
+        } catch (error) {
           const date = new Date();
-          debug(`failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${err}"`);
+          debug(
+            `failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${error}"`,
+          );
           const isFinished = maxAttempts && attempts >= maxAttempts;
           const notBefore = new Date(date.getTime() + calculateDelay(attempts));
           if (!isFinished) {
@@ -249,10 +268,10 @@ export class PrismaQueue<
           await job.update({
             finishedAt: isFinished ? date : null,
             failedAt: date,
-            error: serializeError(err),
+            error: serializeError(error),
             notBefore: isFinished ? null : notBefore,
           });
-          this.emit("job:error", job);
+          this.emit("error", error, job);
           if (deleteOn === "failure" || deleteOn === "always") {
             await job.delete();
           }
