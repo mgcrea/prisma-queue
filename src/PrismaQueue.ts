@@ -11,6 +11,7 @@ import {
   getCurrentTimeZone,
   getTableName,
   serializeError,
+  uncapitalize,
   waitFor,
 } from "./utils";
 
@@ -20,6 +21,7 @@ export type PrismaQueueOptions = {
   maxConcurrency?: number;
   pollInterval?: number;
   jobInterval?: number;
+  modelName?: string;
   tableName?: string;
   deleteOn?: "success" | "failure" | "always" | "never";
   alignTimeZone?: boolean;
@@ -62,7 +64,8 @@ export class PrismaQueue<
     const {
       prisma = new PrismaClient(),
       name = "default",
-      tableName = getTableName("QueueJob"),
+      modelName = "QueueJob",
+      tableName = getTableName(modelName),
       maxConcurrency = DEFAULT_MAX_CONCURRENCY,
       pollInterval = DEFAULT_POLL_INTERVAL,
       jobInterval = DEFAULT_JOB_INTERVAL,
@@ -77,6 +80,7 @@ export class PrismaQueue<
     this.name = name;
     this.#prisma = prisma;
     this.config = {
+      modelName,
       tableName,
       maxConcurrency,
       pollInterval,
@@ -86,8 +90,9 @@ export class PrismaQueue<
     };
   }
 
-  private get model() {
-    return this.#prisma.queueJob;
+  private get model(): Prisma.QueueJobDelegate {
+    const queueJob = uncapitalize(this.config.modelName) as "queueJob";
+    return this.#prisma[queueJob];
   }
 
   public async start(): Promise<void> {
@@ -270,6 +275,8 @@ export class PrismaQueue<
 
   public async size(): Promise<number> {
     const { name: queueName } = this;
-    return await this.#prisma.queueJob.count({ where: { queue: queueName, finishedAt: null } });
+    return await this.model.count({
+      where: { queue: queueName, finishedAt: null },
+    });
   }
 }
