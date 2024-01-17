@@ -57,7 +57,7 @@ export class PrismaQueue<
 
   public constructor(
     private options: PrismaQueueOptions = {},
-    public worker?: JobWorker<T, U>,
+    public worker: JobWorker<T, U>,
   ) {
     super();
 
