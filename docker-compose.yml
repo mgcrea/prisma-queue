@@ -4,7 +4,7 @@ services:
   # https://hub.docker.com/r/bitnami/postgresql
   # https://github.com/bitnami/bitnami-docker-postgresql
   postgresql:
-    image: docker.io/bitnami/postgresql:14.7.0-debian-11-r12
+    image: docker.io/bitnami/postgresql:14
     ports:
       - '5432:5432'
     environment:
@@ -12,4 +12,4 @@ services:
       POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       POSTGRESQL_DATABASE: prisma-queue
     volumes:
-      - './data/postgresql:/bitnami/postgresql/data'
+      - './data/postgresql:/bitnami/postgresql'
