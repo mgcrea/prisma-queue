@@ -1,18 +1,18 @@
 import type { Prisma } from "@prisma/client";
-import type { DatabaseJob, PrismaLightClient } from "./types";
+import type { DatabaseJob } from "./types";
 
 export type PrismaJobOptions = {
-  prisma: PrismaLightClient;
+  model: Prisma.QueueJobDelegate;
 };
 
 export class PrismaJob<T, U> {
-  #prisma: PrismaLightClient;
+  #model: Prisma.QueueJobDelegate;
   #record: DatabaseJob<T, U>;
 
   public readonly id;
 
-  constructor(record: DatabaseJob<T, U>, { prisma }: PrismaJobOptions) {
-    this.#prisma = prisma;
+  constructor(record: DatabaseJob<T, U>, { model }: PrismaJobOptions) {
+    this.#model = model;
     this.#record = record;
     this.id = record["id"];
   }
@@ -47,7 +47,7 @@ export class PrismaJob<T, U> {
   }
 
   public async fetch() {
-    const record = (await this.#prisma.queueJob.findUnique({
+    const record = (await this.#model.findUnique({
       where: { id: this.id },
     })) as DatabaseJob<T, U>;
     this.#assign(record);
@@ -55,7 +55,7 @@ export class PrismaJob<T, U> {
   }
 
   public async update(data: Prisma.QueueJobUpdateInput) {
-    const record = (await this.#prisma.queueJob.update({
+    const record = (await this.#model.update({
       where: { id: this.id },
       data,
     })) as DatabaseJob<T, U>;
@@ -64,7 +64,7 @@ export class PrismaJob<T, U> {
   }
 
   public async delete() {
-    const record = (await this.#prisma.queueJob.delete({
+    const record = (await this.#model.delete({
       where: { id: this.id },
     })) as DatabaseJob<T, U>;
     return record;
