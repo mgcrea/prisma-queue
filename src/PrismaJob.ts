@@ -23,6 +23,9 @@ export class PrismaJob<T, U> {
     }
   }
 
+  public get record() {
+    return this.#record;
+  }
   public get key() {
     return this.#record.key;
   }
