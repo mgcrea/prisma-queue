@@ -1,4 +1,4 @@
-import { PrismaJob, PrismaQueue, createQueue, type PrismaQueueOptions } from "src/index";
+import { PrismaJob, PrismaQueue, PrismaQueueEvents, createQueue, type PrismaQueueOptions } from "src/index";
 import type { JobWorker } from "src/types";
 import { prisma } from "./client";
 
@@ -21,16 +21,20 @@ export const waitForNthJob = <T extends JobPayload, U extends JobResult>(
   nth: number,
 ) => waitForNthEvent(queue, "dequeue", nth);
 
-export const waitForNextEvent = (queue: PrismaQueue<JobPayload, JobResult>, eventName: string) =>
+export const waitForNextEvent = <T extends JobPayload, U extends JobResult>(
+  queue: PrismaQueue<T, U>,
+  eventName: keyof PrismaQueueEvents<T, U>,
+) =>
   new Promise((resolve) => {
-    queue.once(eventName, (job) => {
+    const listener = (job: PrismaJob<T, U>) => {
       resolve(job);
-    });
+    };
+    queue.once(eventName, listener);
   });
 
 export const waitForNthEvent = <T extends JobPayload, U extends JobResult>(
   queue: PrismaQueue<T, U>,
-  eventName: string,
+  eventName: keyof PrismaQueueEvents<T, U>,
   nth = 1,
 ) =>
   new Promise((resolve) => {

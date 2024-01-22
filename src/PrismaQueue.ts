@@ -49,6 +49,7 @@ export type PrismaQueueEvents<T extends JobPayload = JobPayload, U extends JobRe
 
 export interface PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult = JobResult> {
   on<E extends keyof PrismaQueueEvents<T, U>>(event: E, listener: PrismaQueueEvents<T, U>[E]): this;
+  once<E extends keyof PrismaQueueEvents<T, U>>(event: E, listener: PrismaQueueEvents<T, U>[E]): this;
   emit<E extends keyof PrismaQueueEvents<T, U>>(
     event: E,
     ...args: Parameters<PrismaQueueEvents<T, U>[E]>
