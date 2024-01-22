@@ -3,6 +3,7 @@ import type { JobPayload, JobResult, JobWorker } from "./types";
 
 export * from "./PrismaJob";
 export * from "./PrismaQueue";
+export type * from "./types";
 
 export { prepareForJson, restoreFromJson } from "./utils";
 
