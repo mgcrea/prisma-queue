@@ -106,6 +106,16 @@ export class PrismaQueue<
       deleteOn,
       alignTimeZone,
     };
+
+    // Default error handler
+    this.on("error", (error, job) =>
+      debug(
+        job
+          ? `Job with id=${job.id} failed for queue named="${this.name}" with error`
+          : `Queue named="${this.name}" encountered an unexpected error`,
+        error,
+      ),
+    );
   }
 
   private get model(): Prisma.QueueJobDelegate {

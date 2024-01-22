@@ -1,4 +1,4 @@
-version: '3.9'
+version: "3.9"
 
 services:
   # https://hub.docker.com/r/bitnami/postgresql
@@ -6,10 +6,10 @@ services:
   postgresql:
     image: docker.io/bitnami/postgresql:14
     ports:
-      - '5432:5432'
+      - "6432:5432"
     environment:
       POSTGRESQL_USERNAME: ${POSTGRES_USER:-postgres}
       POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       POSTGRESQL_DATABASE: prisma-queue
     volumes:
-      - './data/postgresql:/bitnami/postgresql'
+      - "./data/postgresql:/bitnami/postgresql"

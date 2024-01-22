@@ -34,8 +34,8 @@
     "prettycheck": "prettier --check src/ test/",
     "prettify": "prettier --write src/ test/",
     "typecheck": "tsc --noEmit",
-    "spec": "DEBUG=prisma-queue,prisma-query vitest --run",
-    "dev": "DEBUG=prisma-queue,prisma-query vitest --watch",
+    "spec": "DEBUG=prisma-queue,prisma-query vitest --run --pool=forks",
+    "dev": "DEBUG=prisma-queue,prisma-query vitest --watch --pool=forks",
     "test": "npm run lint && npm run prettycheck && npm run typecheck && npm run spec",
     "prepublishOnly": "npm run build"
   },
@@ -61,6 +61,6 @@
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vite-tsconfig-paths": "^4.3.1",
-    "vitest": "^1.2.0"
+    "vitest": "^1.2.1"
   }
 }
