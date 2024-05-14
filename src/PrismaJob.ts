@@ -1,18 +1,23 @@
 import type { Prisma } from "@prisma/client";
-import type { DatabaseJob } from "./types";
+import type { DatabaseJob, PrismaLightClient } from "./types";
+import { isPrismaError } from "./utils";
+// import { debug } from "./utils";
 
 export type PrismaJobOptions = {
   model: Prisma.QueueJobDelegate;
+  client: PrismaLightClient;
 };
 
 export class PrismaJob<T, U> {
   #model: Prisma.QueueJobDelegate;
+  #client: PrismaLightClient;
   #record: DatabaseJob<T, U>;
 
   public readonly id;
 
-  constructor(record: DatabaseJob<T, U>, { model }: PrismaJobOptions) {
+  constructor(record: DatabaseJob<T, U>, { model, client }: PrismaJobOptions) {
     this.#model = model;
+    this.#client = client;
     this.#record = record;
     this.id = record["id"];
   }
@@ -71,5 +76,26 @@ export class PrismaJob<T, U> {
       where: { id: this.id },
     })) as DatabaseJob<T, U>;
     return record;
+  }
+
+  public async isLocked(): Promise<boolean> {
+    try {
+      // Attempt to select and lock the row with a timeout
+      await this.#client.$executeRawUnsafe(
+        `SELECT "id" FROM "public"."queue_jobs" WHERE "id" = $1 FOR UPDATE NOWAIT`,
+        this.id,
+      );
+
+      // If we reach here, the row is not locked
+      return false;
+    } catch (error) {
+      // Handle specific error types that indicate lock contention
+      if (isPrismaError(error) && error.meta?.["code"] === "55P03") {
+        // PostgreSQL's lock_not_available
+        return true;
+      }
+      // Re-throw other unexpected errors
+      throw error;
+    }
   }
 }

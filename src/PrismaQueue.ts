@@ -167,7 +167,7 @@ export class PrismaQueue<
       }
       return await this.model.create({ data });
     });
-    const job = new PrismaJob(record as DatabaseJob<T, U>, { model: this.model });
+    const job = new PrismaJob(record as DatabaseJob<T, U>, { model: this.model, client: this.#prisma });
     this.emit("enqueue", job);
     return job;
   }
@@ -188,25 +188,40 @@ export class PrismaQueue<
     const { maxConcurrency, pollInterval, jobInterval } = this.config;
 
     while (!this.stopped) {
+      // Ensure that poll waits when no immediate jobs need processing.
+      if (this.concurrency >= maxConcurrency) {
+        await waitFor(pollInterval);
+        continue;
+      }
+      // Query the queue size only when needed to reduce database load.
       let estimatedQueueSize = await this.size();
+      if (estimatedQueueSize === 0) {
+        await waitFor(pollInterval);
+        continue;
+      }
 
-      while (estimatedQueueSize > 0 && this.concurrency < maxConcurrency) {
-        estimatedQueueSize--;
+      while (this.concurrency < maxConcurrency && estimatedQueueSize > 0) {
         this.concurrency++;
         setImmediate(() =>
           this.dequeue()
             .then((job) => {
               if (!job) {
                 estimatedQueueSize = 0;
+              } else {
+                estimatedQueueSize--;
               }
             })
             .catch((error) => this.emit("error", error))
-            .finally(() => this.concurrency--),
+            .finally(() => {
+              this.concurrency--;
+              // Trigger an immediate next job processing if possible.
+              if (this.concurrency < maxConcurrency && !this.stopped) {
+                setImmediate(() => this.poll());
+              }
+            }),
         );
         await waitFor(jobInterval);
       }
-
-      await waitFor(pollInterval);
     }
   }
 
@@ -250,11 +265,12 @@ export class PrismaQueue<
           queueName,
         );
         if (!rows.length || !rows[0]) {
+          debug(`no job found to process`);
           // @NOTE Failed to acquire a lock
           return null;
         }
         const { id, payload, attempts, maxAttempts } = rows[0];
-        const job = new PrismaJob<T, U>(rows[0], { model: client[queueJobKey] });
+        const job = new PrismaJob<T, U>(rows[0], { model: client[queueJobKey], client });
         let result;
         try {
           assert(this.worker, "Missing queue worker to process job");

@@ -1,3 +1,5 @@
+import { Prisma } from "@prisma/client";
+
 export const serializeError = (err: unknown) => {
   if (err instanceof Error) {
     return {
@@ -11,4 +13,8 @@ export const serializeError = (err: unknown) => {
     message: `${err}`,
     stack: undefined,
   };
+};
+
+export const isPrismaError = (error: unknown): error is Prisma.PrismaClientKnownRequestError => {
+  return error instanceof Error && "code" in error;
 };

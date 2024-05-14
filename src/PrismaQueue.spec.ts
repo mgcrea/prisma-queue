@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import type { PrismaQueue } from "src/index";
 import { PrismaJob } from "src/PrismaJob";
-import { debug, serializeError } from "src/utils";
+import { debug, serializeError, waitFor } from "src/utils";
 import {
   createEmailQueue,
   prisma,
@@ -124,6 +124,7 @@ describe("PrismaQueue", () => {
     });
     it("should properly dequeue a successful job", async () => {
       queue.worker = vi.fn(async (_job) => {
+        await waitFor(200);
         return { code: "200" };
       });
       const job = await queue.enqueue({ email: "foo@bar.com" });
@@ -309,6 +310,34 @@ describe("PrismaQueue", () => {
       await waitForNextJob(queue);
       const record = await job.fetch();
       expect(record?.progress).toBe(50);
+    });
+    afterAll(() => {
+      queue.stop();
+    });
+  });
+
+  describe("Job.isLocked()", () => {
+    let queue: PrismaQueue<JobPayload, JobResult>;
+    beforeAll(async () => {
+      queue = createEmailQueue({ pollInterval: 200 });
+    });
+    beforeEach(async () => {
+      await prisma.queueJob.deleteMany();
+      queue.start();
+    });
+    afterEach(async () => {
+      queue.stop();
+    });
+    it("should be toggled", async () => {
+      queue.worker = vi.fn(async (_job) => {
+        await waitFor(2000);
+        return { code: "200" };
+      });
+      const job = await queue.enqueue({ email: "foo@bar.com" });
+      await waitFor(400);
+      expect(await job.isLocked()).toBe(true);
+      await waitForNextJob(queue);
+      expect(await job.isLocked()).toBe(false);
     });
     afterAll(() => {
       queue.stop();
