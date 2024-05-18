@@ -28,7 +28,7 @@ export class PrismaJob<T, U> {
     }
   }
 
-  public get record() {
+  public get record(): DatabaseJob<T, U> {
     return this.#record;
   }
   public get key() {
@@ -50,11 +50,11 @@ export class PrismaJob<T, U> {
     return this.#record.error;
   }
 
-  public async progress(progress: number) {
+  public async progress(progress: number): Promise<DatabaseJob<T, U>> {
     return await this.update({ progress: Math.max(0, Math.min(100, progress)) });
   }
 
-  public async fetch() {
+  public async fetch(): Promise<DatabaseJob<T, U>> {
     const record = (await this.#model.findUnique({
       where: { id: this.id },
     })) as DatabaseJob<T, U>;
@@ -62,7 +62,7 @@ export class PrismaJob<T, U> {
     return record;
   }
 
-  public async update(data: Prisma.QueueJobUpdateInput) {
+  public async update(data: Prisma.QueueJobUpdateInput): Promise<DatabaseJob<T, U>> {
     const record = (await this.#model.update({
       where: { id: this.id },
       data,
@@ -71,7 +71,7 @@ export class PrismaJob<T, U> {
     return record;
   }
 
-  public async delete() {
+  public async delete(): Promise<DatabaseJob<T, U>> {
     const record = (await this.#model.delete({
       where: { id: this.id },
     })) as DatabaseJob<T, U>;
