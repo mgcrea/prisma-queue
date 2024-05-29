@@ -214,10 +214,6 @@ export class PrismaQueue<
             .catch((error) => this.emit("error", error))
             .finally(() => {
               this.concurrency--;
-              // Trigger an immediate next job processing if possible.
-              if (this.concurrency < maxConcurrency && !this.stopped) {
-                setImmediate(() => this.poll());
-              }
             }),
         );
         await waitFor(jobInterval);
