@@ -148,6 +148,7 @@ export class PrismaQueue<
       if (key && runAt) {
         const { count } = await this.model.deleteMany({
           where: {
+            queue: queueName,
             key,
             runAt: {
               gte: new Date(),
