@@ -123,14 +123,14 @@ export class PrismaQueue<
     return this.#prisma[queueJobKey];
   }
 
-  public start(): void {
+  public async start(): Promise<void> {
     debug(`starting queue named="${this.name}"...`);
     if (!this.stopped) {
       debug(`queue named="${this.name}" is already running, skipping...`);
       return;
     }
     this.stopped = false;
-    this.poll();
+    return this.poll();
   }
 
   public async stop(): Promise<void> {
