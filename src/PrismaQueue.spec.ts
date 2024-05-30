@@ -4,6 +4,7 @@ import { PrismaJob } from "src/PrismaJob";
 import { debug, serializeError, waitFor } from "src/utils";
 import {
   createEmailQueue,
+  DEFAULT_POLL_INTERVAL,
   prisma,
   waitForNextEvent,
   waitForNextJob,
@@ -148,6 +149,40 @@ describe("PrismaQueue", () => {
       expect(record?.finishedAt).toBeNull();
       expect(record?.error).toEqual(serializeError(error));
     });
+    it("should properly dequeue multiple jobs in a row", async () => {
+      const JOB_WAIT = 50;
+      queue.worker = vi.fn(async (_job) => {
+        await waitFor(JOB_WAIT);
+        return { code: "200" };
+      });
+      await Promise.all([
+        queue.enqueue({ email: "foo1@bar1.com" }),
+        queue.enqueue({ email: "foo2@bar2.com" }),
+      ]);
+      await waitFor(DEFAULT_POLL_INTERVAL + JOB_WAIT * 2 + 100);
+      expect(queue.worker).toHaveBeenCalledTimes(2);
+      expect(queue.worker).toHaveBeenNthCalledWith(2, expect.any(PrismaJob), expect.any(PrismaClient));
+    });
+    it("should properly handle multiple restarts", async () => {
+      const JOB_WAIT = 50;
+      await queue.stop();
+      queue.worker = vi.fn(async (_job) => {
+        await waitFor(JOB_WAIT);
+        return { code: "200" };
+      });
+      await Promise.all([
+        queue.enqueue({ email: "foo1@bar1.com" }),
+        queue.enqueue({ email: "foo2@bar2.com" }),
+      ]);
+      queue.start();
+      expect(queue.worker).toHaveBeenCalledTimes(0);
+      await queue.stop();
+      queue.start();
+      await waitFor(10);
+      expect(queue.worker).toHaveBeenCalledTimes(1);
+      await waitFor(JOB_WAIT + 10);
+      expect(queue.worker).toHaveBeenCalledTimes(1);
+    });
     afterAll(() => {
       queue.stop();
     });
@@ -243,6 +278,37 @@ describe("PrismaQueue", () => {
       afterAll(() => {
         queue.stop();
       });
+    });
+  });
+
+  describe("maxConcurrency", () => {
+    let queue: PrismaQueue<JobPayload, JobResult>;
+    beforeAll(async () => {
+      queue = createEmailQueue({ maxConcurrency: 2 });
+    });
+    beforeEach(async () => {
+      await prisma.queueJob.deleteMany();
+      queue.start();
+    });
+    afterEach(async () => {
+      queue.stop();
+    });
+    it("should properly dequeue multiple jobs in a row according to maxConcurrency", async () => {
+      const JOB_WAIT = 100;
+      queue.worker = vi.fn(async (_job) => {
+        await waitFor(JOB_WAIT);
+        return { code: "200" };
+      });
+      await Promise.all([
+        queue.enqueue({ email: "foo1@bar1.com" }),
+        queue.enqueue({ email: "foo2@bar2.com" }),
+      ]);
+      await waitFor(DEFAULT_POLL_INTERVAL + 100);
+      expect(queue.worker).toHaveBeenCalledTimes(2);
+      expect(queue.worker).toHaveBeenNthCalledWith(2, expect.any(PrismaJob), expect.any(PrismaClient));
+    });
+    afterAll(() => {
+      queue.stop();
     });
   });
 

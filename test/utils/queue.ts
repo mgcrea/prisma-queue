@@ -5,13 +5,31 @@ import { prisma } from "./client";
 export type JobPayload = { email: string };
 export type JobResult = { code: string };
 
-const pollInterval = 500;
+export const DEFAULT_POLL_INTERVAL = 500;
+let globalQueueIndex = 0;
+
 export const createEmailQueue = (
   options: PrismaQueueOptions = {},
   worker: JobWorker<JobPayload, JobResult> = async (_job) => {
     return { code: "200" };
   },
-) => createQueue<JobPayload, JobResult>({ prisma, pollInterval, ...options }, worker);
+) => {
+  const {
+    pollInterval = DEFAULT_POLL_INTERVAL,
+    name = `default-${globalQueueIndex}`,
+    ...otherOptions
+  } = options;
+  globalQueueIndex++;
+  return createQueue<JobPayload, JobResult>(
+    {
+      prisma,
+      name,
+      pollInterval,
+      ...otherOptions,
+    },
+    worker,
+  );
+};
 
 export const waitForNextJob = (queue: PrismaQueue<JobPayload, JobResult>) =>
   waitForNextEvent(queue, "dequeue");

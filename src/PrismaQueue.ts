@@ -58,7 +58,7 @@ export interface PrismaQueue<T extends JobPayload = JobPayload, U extends JobRes
 
 const DEFAULT_MAX_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 10 * 1000;
-const DEFAULT_JOB_INTERVAL = 25;
+const DEFAULT_JOB_INTERVAL = 50;
 const DEFAULT_DELETE_ON = "never";
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
@@ -123,15 +123,22 @@ export class PrismaQueue<
     return this.#prisma[queueJobKey];
   }
 
-  public async start(): Promise<void> {
-    debug(`start`, this.name);
+  public start(): void {
+    debug(`starting queue named="${this.name}"...`);
+    if (!this.stopped) {
+      debug(`queue named="${this.name}" is already running, skipping...`);
+      return;
+    }
     this.stopped = false;
-    return this.poll();
+    this.poll();
   }
 
   public async stop(): Promise<void> {
-    debug(`stop`, this.name);
+    const { pollInterval } = this.config;
+    debug(`stopping queue named="${this.name}"...`);
     this.stopped = true;
+    // Wait for the queue to stop
+    await waitFor(pollInterval);
   }
 
   public async enqueue(
@@ -185,11 +192,11 @@ export class PrismaQueue<
   }
 
   private async poll(): Promise<void> {
-    debug(`poll`, this.name);
     const { maxConcurrency, pollInterval, jobInterval } = this.config;
+    debug(`polling queue named="${this.name}" with maxConcurrency=${maxConcurrency}...`);
 
     while (!this.stopped) {
-      // Ensure that poll waits when no immediate jobs need processing.
+      // Wait for the queue to be ready
       if (this.concurrency >= maxConcurrency) {
         await waitFor(pollInterval);
         continue;
@@ -201,23 +208,34 @@ export class PrismaQueue<
         continue;
       }
 
-      while (this.concurrency < maxConcurrency && estimatedQueueSize > 0) {
-        this.concurrency++;
-        setImmediate(() =>
-          this.dequeue()
-            .then((job) => {
-              if (!job) {
-                estimatedQueueSize = 0;
-              } else {
-                estimatedQueueSize--;
-              }
-            })
-            .catch((error) => this.emit("error", error))
-            .finally(() => {
-              this.concurrency--;
-            }),
-        );
-        await waitFor(jobInterval);
+      // Will loop until the queue is empty or stopped
+      while (estimatedQueueSize > 0 && !this.stopped) {
+        // Will loop until the concurrency limit is reached or stopped
+        while (this.concurrency < maxConcurrency && !this.stopped) {
+          // debug(`concurrency=${this.concurrency}, maxConcurrency=${maxConcurrency}`);
+          debug(`processing job from queue named="${this.name}"...`);
+          this.concurrency++;
+          setImmediate(() =>
+            this.dequeue()
+              .then((job) => {
+                if (job) {
+                  debug(`dequeued job({id: ${job.id}, payload: ${JSON.stringify(job.payload)}})`);
+                  estimatedQueueSize--;
+                } else {
+                  // No more jobs to process
+                  estimatedQueueSize = 0;
+                }
+              })
+              .catch((error) => {
+                this.emit("error", error);
+              })
+              .finally(() => {
+                this.concurrency--;
+              }),
+          );
+          await waitFor(jobInterval);
+        }
+        await waitFor(jobInterval * 2);
       }
     }
   }
@@ -229,7 +247,7 @@ export class PrismaQueue<
     if (this.stopped) {
       return null;
     }
-    debug(`dequeue`, this.name);
+    debug(`dequeuing from queue named="${this.name}"...`);
     const { name: queueName } = this;
     const { tableName: tableNameRaw, deleteOn, alignTimeZone } = this.config;
     const tableName = escape(tableNameRaw);
@@ -262,7 +280,7 @@ export class PrismaQueue<
           queueName,
         );
         if (!rows.length || !rows[0]) {
-          debug(`no job found to process`);
+          debug(`no jobs found in queue named="${this.name}"`);
           // @NOTE Failed to acquire a lock
           return null;
         }
@@ -273,6 +291,7 @@ export class PrismaQueue<
           assert(this.worker, "Missing queue worker to process job");
           debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
           result = await this.worker(job, this.#prisma);
+          debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
           const date = new Date();
           await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });
           this.emit("success", result, job);
@@ -310,6 +329,9 @@ export class PrismaQueue<
       const { key, cron, payload, finishedAt } = job;
       if (finishedAt && cron && key) {
         // Schedule next cron
+        debug(
+          `scheduling next cron job({key: ${key}, cron: ${cron}}) with payload=${JSON.stringify(payload)}`,
+        );
         await this.schedule({ key, cron }, payload);
       }
     }
