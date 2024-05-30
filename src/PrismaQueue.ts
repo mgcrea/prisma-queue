@@ -348,7 +348,7 @@ export class PrismaQueue<
       where.AND = { OR: [{ notBefore: { lte: date } }, { notBefore: null }] };
     }
     return await this.model.count({
-      where: { queue: queueName, finishedAt: null, runAt: { lte: date } },
+      where,
     });
   }
 }
