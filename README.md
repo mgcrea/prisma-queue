@@ -37,11 +37,13 @@ Simple, reliable and efficient concurrent work queue for [Prisma](https://prisma
 
 ```bash
 npm install @mgcrea/prisma-queue --save
+# or
+pnpm add @mgcrea/prisma-queue
 ```
 
 ## Quickstart
 
-1. First add `"interactiveTransactions"` to your `schema.prisma` client configuration:
+1. If you use an old version of Prisma ranging from 2.29.0 to 4.6.1 (included), you must first add `"interactiveTransactions"` to your `schema.prisma` client configuration:
 
 ```prisma
 generator client {
@@ -92,7 +94,7 @@ import { emailQueue } from "./emailQueue";
 const main = async () => {
   const nextJob = await queue.schedule(
     { key: "email-schedule", cron: "5 5 * * *" },
-    { email: "foo@bar.com" }
+    { email: "foo@bar.com" },
   );
 };
 
