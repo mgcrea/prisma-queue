@@ -1,6 +1,6 @@
 {
   "name": "@mgcrea/prisma-queue",
-  "version": "1.10.4",
+  "version": "1.11.0",
   "author": "Olivier Louvignes <olivier@mgcrea.io>",
   "repository": "github:mgcrea/fastify-session-prisma-store",
   "license": "MIT",
