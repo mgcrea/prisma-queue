@@ -8,6 +8,9 @@ export type PrismaJobOptions = {
   client: PrismaLightClient;
 };
 
+/**
+ * Represents a job within a Prisma-managed queue.
+ */
 export class PrismaJob<T, U> {
   #model: Prisma.QueueJobDelegate;
   #client: PrismaLightClient;
@@ -15,6 +18,12 @@ export class PrismaJob<T, U> {
 
   public readonly id;
 
+  /**
+   * Constructs a new PrismaJob instance with the provided job record and database access objects.
+   * @param record - The initial database job record.
+   * @param model - The Prisma delegate used for database operations related to the job.
+   * @param client - The Prisma client for executing arbitrary queries.
+   */
   constructor(record: DatabaseJob<T, U>, { model, client }: PrismaJobOptions) {
     this.#model = model;
     this.#client = client;
@@ -22,38 +31,76 @@ export class PrismaJob<T, U> {
     this.id = record["id"];
   }
 
+  /**
+   * Internal method to assign a new record to the job.
+   * @param record - Optional new record to assign.
+   */
   #assign(record?: DatabaseJob<T, U>) {
     if (record) {
       this.#record = record;
     }
   }
 
+  /**
+   * Gets the current job record.
+   */
   public get record(): DatabaseJob<T, U> {
     return this.#record;
   }
+
+  /**
+   * Gets the job's unique key if any.
+   */
   public get key() {
     return this.#record.key;
   }
+
+  /**
+   * Gets the CRON expression associated with the job for recurring scheduling.
+   */
   public get cron() {
     return this.#record.cron;
   }
+
+  /**
+   * Gets the job's priority level.
+   */
   public get priority() {
     return this.#record.priority;
   }
+
+  /**
+   * Gets the payload associated with the job.
+   */
   public get payload() {
     return this.#record.payload;
   }
+
+  /**
+   * Gets the timestamp when the job was finished.
+   */
   public get finishedAt() {
     return this.#record.finishedAt;
   }
+
+  /**
+   * Gets the error record if the job failed.
+   */
   public get error() {
     return this.#record.error;
   }
 
+  /**
+   * Updates the job's progress percentage.
+   * @param progress - The new progress percentage.
+   */
   public async progress(progress: number): Promise<DatabaseJob<T, U>> {
     return await this.update({ progress: Math.max(0, Math.min(100, progress)) });
   }
 
+  /**
+   * Fetches the latest job record from the database and updates the internal state.
+   */
   public async fetch(): Promise<DatabaseJob<T, U>> {
     const record = (await this.#model.findUnique({
       where: { id: this.id },
@@ -62,6 +109,10 @@ export class PrismaJob<T, U> {
     return record;
   }
 
+  /**
+   * Updates the job record in the database with new data.
+   * @param data - The new data to be merged with the existing job record.
+   */
   public async update(data: Prisma.QueueJobUpdateInput): Promise<DatabaseJob<T, U>> {
     const record = (await this.#model.update({
       where: { id: this.id },
@@ -71,6 +122,9 @@ export class PrismaJob<T, U> {
     return record;
   }
 
+  /**
+   * Deletes the job from the database.
+   */
   public async delete(): Promise<DatabaseJob<T, U>> {
     const record = (await this.#model.delete({
       where: { id: this.id },
@@ -78,6 +132,10 @@ export class PrismaJob<T, U> {
     return record;
   }
 
+  /**
+   * Checks if the job is currently locked by another transaction.
+   * @returns {Promise<boolean>} True if the job is locked, false otherwise.
+   */
   public async isLocked(): Promise<boolean> {
     try {
       // Attempt to select and lock the row with a timeout
