@@ -227,7 +227,9 @@ export class PrismaQueue<
    */
   private async poll(): Promise<void> {
     const { maxConcurrency, pollInterval, jobInterval } = this.config;
-    debug(`polling queue named="${this.name}" with maxConcurrency=${maxConcurrency}...`);
+    debug(
+      `polling queue named="${this.name}" with pollInterval=${pollInterval} maxConcurrency=${maxConcurrency}...`,
+    );
 
     while (!this.stopped) {
       // Wait for the queue to be ready
@@ -245,7 +247,7 @@ export class PrismaQueue<
       // Will loop until the queue is empty or stopped
       while (estimatedQueueSize > 0 && !this.stopped) {
         // Will loop until the concurrency limit is reached or stopped
-        while (this.concurrency < maxConcurrency && !this.stopped) {
+        while (estimatedQueueSize > 0 && !this.stopped && this.concurrency < maxConcurrency) {
           // debug(`concurrency=${this.concurrency}, maxConcurrency=${maxConcurrency}`);
           debug(`processing job from queue named="${this.name}"...`);
           this.concurrency++;
