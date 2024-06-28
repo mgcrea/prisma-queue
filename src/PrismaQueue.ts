@@ -141,6 +141,9 @@ export class PrismaQueue<
     await waitFor(pollInterval);
   }
 
+  // Alias for enqueue
+  public add = this.enqueue;
+
   public async enqueue(
     payloadOrFunction: T | JobCreator<T>,
     options: EnqueueOptions = {},
