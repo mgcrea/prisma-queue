@@ -18,6 +18,7 @@ import {
 export type PrismaQueueOptions = {
   prisma?: PrismaClient;
   name?: string;
+  maxAttempts?: number | null;
   maxConcurrency?: number;
   pollInterval?: number;
   jobInterval?: number;
@@ -89,6 +90,7 @@ export class PrismaQueue<
       name = "default",
       modelName = "QueueJob",
       tableName = getTableName(modelName),
+      maxAttempts = null,
       maxConcurrency = DEFAULT_MAX_CONCURRENCY,
       pollInterval = DEFAULT_POLL_INTERVAL,
       jobInterval = DEFAULT_JOB_INTERVAL,
@@ -105,6 +107,7 @@ export class PrismaQueue<
     this.config = {
       modelName,
       tableName,
+      maxAttempts,
       maxConcurrency,
       pollInterval,
       jobInterval,
@@ -172,8 +175,8 @@ export class PrismaQueue<
     options: EnqueueOptions = {},
   ): Promise<PrismaJob<T, U>> {
     debug(`enqueue`, this.name, payloadOrFunction, options);
-    const { name: queueName } = this;
-    const { key, cron = null, maxAttempts = null, priority = 0, runAt } = options;
+    const { name: queueName, config } = this;
+    const { key, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
     const record = await this.#prisma.$transaction(async (client) => {
       const payload =
         payloadOrFunction instanceof Function ? await payloadOrFunction(client) : payloadOrFunction;
