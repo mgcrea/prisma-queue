@@ -23,11 +23,11 @@ describe("PrismaQueue", () => {
         "_events",
         "_eventsCount",
         "_maxListeners",
-        "name",
         "config",
         "concurrency",
         "stopped",
         "add",
+        "name",
         "options",
         "worker",
       ]
@@ -125,64 +125,66 @@ describe("PrismaQueue", () => {
       queue.stop();
     });
     it("should properly dequeue a successful job", async () => {
-      queue.worker = vi.fn(async (_job) => {
+      const worker = vi.fn(async (_job) => {
         await waitFor(200);
         return { code: "200" };
       });
-      const job = await queue.enqueue({ email: "foo@bar.com" });
+      const job = await queue.setWorker(worker).enqueue({ email: "foo@bar.com" });
       await waitForNextJob(queue);
-      expect(queue.worker).toHaveBeenCalledTimes(1);
-      expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), expect.any(PrismaClient));
+      expect(worker).toHaveBeenCalledTimes(1);
+      expect(worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), expect.any(PrismaClient));
       const record = await job.fetch();
       expect(record?.finishedAt).toBeInstanceOf(Date);
     });
     it("should properly dequeue a failed job", async () => {
       let error: Error | null = null;
-      queue.worker = vi.fn(async (_job) => {
+      const worker = vi.fn(async (_job) => {
         error = new Error("failed");
         throw error;
       });
-      const job = await queue.enqueue({ email: "foo@bar.com" });
+      const job = await queue.setWorker(worker).enqueue({ email: "foo@bar.com" });
       await waitForNextJob(queue);
-      expect(queue.worker).toHaveBeenCalledTimes(1);
-      expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), expect.any(PrismaClient));
+      expect(worker).toHaveBeenCalledTimes(1);
+      expect(worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), expect.any(PrismaClient));
       const record = await job.fetch();
       expect(record?.finishedAt).toBeNull();
       expect(record?.error).toEqual(serializeError(error));
     });
     it("should properly dequeue multiple jobs in a row", async () => {
       const JOB_WAIT = 50;
-      queue.worker = vi.fn(async (_job) => {
+      const worker = vi.fn(async (_job) => {
         await waitFor(JOB_WAIT);
         return { code: "200" };
       });
+      queue.setWorker(worker);
       await Promise.all([
         queue.enqueue({ email: "foo1@bar1.com" }),
         queue.enqueue({ email: "foo2@bar2.com" }),
       ]);
       await waitFor(DEFAULT_POLL_INTERVAL + JOB_WAIT * 2 + 100);
-      expect(queue.worker).toHaveBeenCalledTimes(2);
-      expect(queue.worker).toHaveBeenNthCalledWith(2, expect.any(PrismaJob), expect.any(PrismaClient));
+      expect(worker).toHaveBeenCalledTimes(2);
+      expect(worker).toHaveBeenNthCalledWith(2, expect.any(PrismaJob), expect.any(PrismaClient));
     });
     it("should properly handle multiple restarts", async () => {
       const JOB_WAIT = 50;
       await queue.stop();
-      queue.worker = vi.fn(async (_job) => {
+      const worker = vi.fn(async (_job) => {
         await waitFor(JOB_WAIT);
         return { code: "200" };
       });
+      queue.setWorker(worker);
       await Promise.all([
         queue.enqueue({ email: "foo1@bar1.com" }),
         queue.enqueue({ email: "foo2@bar2.com" }),
       ]);
       queue.start();
-      expect(queue.worker).toHaveBeenCalledTimes(0);
+      expect(worker).toHaveBeenCalledTimes(0);
       await queue.stop();
       queue.start();
       await waitFor(10);
-      expect(queue.worker).toHaveBeenCalledTimes(1);
+      expect(worker).toHaveBeenCalledTimes(1);
       await waitFor(JOB_WAIT + 10);
-      expect(queue.worker).toHaveBeenCalledTimes(1);
+      expect(worker).toHaveBeenCalledTimes(1);
     });
     afterAll(() => {
       queue.stop();
@@ -203,12 +205,12 @@ describe("PrismaQueue", () => {
         queue.stop();
       });
       it("should properly dequeue a successful job", async () => {
-        queue.worker = vi.fn(async (_job) => {
+        const worker = vi.fn(async (_job) => {
           return { code: "200" };
         });
-        const job = await queue.enqueue({ email: "foo@bar.com" });
+        const job = await queue.setWorker(worker).enqueue({ email: "foo@bar.com" });
         await waitForNextJob(queue);
-        expect(queue.worker).toHaveBeenCalledTimes(1);
+        expect(worker).toHaveBeenCalledTimes(1);
         const record = await job.fetch();
         expect(record).toBeNull();
       });
@@ -229,13 +231,13 @@ describe("PrismaQueue", () => {
       });
       it("should properly dequeue a failed job", async () => {
         let error: Error | null = null;
-        queue.worker = vi.fn(async (_job) => {
+        const worker = vi.fn(async (_job) => {
           error = new Error("failed");
           throw error;
         });
-        const job = await queue.enqueue({ email: "foo@bar.com" });
+        const job = await queue.setWorker(worker).enqueue({ email: "foo@bar.com" });
         await waitForNextJob(queue);
-        expect(queue.worker).toHaveBeenCalledTimes(1);
+        expect(worker).toHaveBeenCalledTimes(1);
         const record = await job.fetch();
         expect(record).toBeNull();
       });
@@ -255,24 +257,24 @@ describe("PrismaQueue", () => {
         queue.stop();
       });
       it("should properly dequeue a successful job", async () => {
-        queue.worker = vi.fn(async (_job) => {
+        const worker = vi.fn(async (_job) => {
           return { code: "200" };
         });
-        const job = await queue.enqueue({ email: "foo@bar.com" });
+        const job = await queue.setWorker(worker).enqueue({ email: "foo@bar.com" });
         await waitForNextJob(queue);
-        expect(queue.worker).toHaveBeenCalledTimes(1);
+        expect(worker).toHaveBeenCalledTimes(1);
         const record = await job.fetch();
         expect(record).toBeNull();
       });
       it("should properly dequeue a failed job", async () => {
         let error: Error | null = null;
-        queue.worker = vi.fn(async (_job) => {
+        const worker = vi.fn(async (_job) => {
           error = new Error("failed");
           throw error;
         });
-        const job = await queue.enqueue({ email: "foo@bar.com" });
+        const job = await queue.setWorker(worker).enqueue({ email: "foo@bar.com" });
         await waitForNextJob(queue);
-        expect(queue.worker).toHaveBeenCalledTimes(1);
+        expect(worker).toHaveBeenCalledTimes(1);
         const record = await job.fetch();
         expect(record).toBeNull();
       });
@@ -296,17 +298,18 @@ describe("PrismaQueue", () => {
     });
     it("should properly dequeue multiple jobs in a row according to maxConcurrency", async () => {
       const JOB_WAIT = 100;
-      queue.worker = vi.fn(async (_job) => {
+      const worker = vi.fn(async (_job) => {
         await waitFor(JOB_WAIT);
         return { code: "200" };
       });
+      queue.setWorker(worker);
       await Promise.all([
         queue.enqueue({ email: "foo1@bar1.com" }),
         queue.enqueue({ email: "foo2@bar2.com" }),
       ]);
       await waitFor(DEFAULT_POLL_INTERVAL + 100);
-      expect(queue.worker).toHaveBeenCalledTimes(2);
-      expect(queue.worker).toHaveBeenNthCalledWith(2, expect.any(PrismaJob), expect.any(PrismaClient));
+      expect(worker).toHaveBeenCalledTimes(2);
+      expect(worker).toHaveBeenNthCalledWith(2, expect.any(PrismaJob), expect.any(PrismaClient));
     });
     afterAll(() => {
       queue.stop();
@@ -326,22 +329,23 @@ describe("PrismaQueue", () => {
       queue.stop();
     });
     it("should properly prioritize a job with a lower priority", async () => {
-      queue.worker = vi.fn(async (_job) => {
+      const worker = vi.fn(async (_job) => {
         return { code: "200" };
       });
+      queue.setWorker(worker);
       await queue.enqueue({ email: "foo@bar.com" });
       await queue.enqueue({ email: "baz@bar.com" }, { priority: -1 });
       queue.start();
       await waitForNthJob(queue, 2);
-      expect(queue.worker).toHaveBeenCalledTimes(2);
-      expect(queue.worker).toHaveBeenNthCalledWith(
+      expect(worker).toHaveBeenCalledTimes(2);
+      expect(worker).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
           payload: { email: "baz@bar.com" },
         }),
         expect.any(PrismaClient),
       );
-      expect(queue.worker).toHaveBeenNthCalledWith(
+      expect(worker).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
           payload: { email: "foo@bar.com" },
@@ -367,12 +371,12 @@ describe("PrismaQueue", () => {
       queue.stop();
     });
     it("should properly update job progress", async () => {
-      queue.worker = vi.fn(async (job) => {
+      const worker = vi.fn(async (job) => {
         debug("working...", job.id, job.payload);
         await job.progress(50);
         throw new Error("failed");
       });
-      const job = await queue.enqueue({ email: "foo@bar.com" });
+      const job = await queue.setWorker(worker).enqueue({ email: "foo@bar.com" });
       queue.start();
       await waitForNextJob(queue);
       const record = await job.fetch();
@@ -396,11 +400,11 @@ describe("PrismaQueue", () => {
       queue.stop();
     });
     it("should be toggled", async () => {
-      queue.worker = vi.fn(async (_job) => {
+      const worker = vi.fn(async (_job) => {
         await waitFor(2000);
         return { code: "200" };
       });
-      const job = await queue.enqueue({ email: "foo@bar.com" });
+      const job = await queue.setWorker(worker).enqueue({ email: "foo@bar.com" });
       await waitFor(400);
       expect(await job.isLocked()).toBe(true);
       await waitForNextJob(queue);

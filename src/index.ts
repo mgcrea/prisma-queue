@@ -21,8 +21,7 @@ export { prepareForJson, restoreFromJson } from "./utils";
  *
  * @example
  * // Create a new queue for email sending jobs
- * const emailQueue = createQueue<EmailPayload, void>({
- *   name: 'emails',
+ * const emailQueue = createQueue<EmailPayload, void>("email", {
  *   prisma: new PrismaClient(),
  *   pollInterval: 5000,
  * }, async (job) => {
@@ -30,8 +29,9 @@ export { prepareForJson, restoreFromJson } from "./utils";
  * });
  */
 export const createQueue = <T extends JobPayload = JobPayload, U extends JobResult = JobResult>(
-  options: PrismaQueueOptions,
-  worker: JobWorker<T, U>,
+  name?: string,
+  options?: PrismaQueueOptions,
+  worker?: JobWorker<T, U>,
 ) => {
-  return new PrismaQueue<T, U>(options, worker);
+  return new PrismaQueue<T, U>(name, options, worker);
 };

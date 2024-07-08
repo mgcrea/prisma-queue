@@ -30,6 +30,8 @@
   "scripts": {
     "start": "DEBUG=prisma-queue,prisma-query vitest",
     "build": "tsup --entry src/index.ts --format cjs,esm --sourcemap --dts --clean --entry src/bin/cli.ts",
+    "tdd": "vitest --watch --reporter=basic",
+    "coverage": "vitest run --coverage; open coverage/index.html",
     "lint": "eslint src/ test/",
     "prettycheck": "prettier --check src/ test/",
     "prettify": "prettier --write src/ test/",
@@ -55,6 +57,8 @@
     "@tsconfig/strictest": "^2.0.5",
     "@types/debug": "^4.1.12",
     "@types/node": "^20.14.9",
+    "@vitest/coverage-v8": "^1.6.0",
+    "dotenv": "^16.4.5",
     "eslint": "^8.57.0",
     "prettier": "^3.3.2",
     "prettier-plugin-organize-imports": "^3.2.4",

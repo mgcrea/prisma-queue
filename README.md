@@ -43,15 +43,6 @@ pnpm add @mgcrea/prisma-queue
 
 ## Quickstart
 
-1. If you use an old version of Prisma ranging from 2.29.0 to 4.6.1 (included), you must first add `"interactiveTransactions"` to your `schema.prisma` client configuration:
-
-```prisma
-generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["interactiveTransactions"]
-}
-```
-
 1. Append the [`QueueJob` model](./prisma/schema.prisma) to your `schema.prisma` file
 
 1. Create your queue
@@ -60,7 +51,7 @@ generator client {
 type JobPayload = { email: string };
 type JobResult = { status: number };
 
-export const emailQueue = createQueue<JobPayload, JobResult>({ name: "email" }, async (job, client) => {
+export const emailQueue = createQueue<JobPayload, JobResult>("email", async (job, client) => {
   const { id, payload } = job;
   console.log(`Processing job#${id} with payload=${JSON.stringify(payload)})`);
   // await someAsyncMethod();
@@ -80,7 +71,7 @@ export const emailQueue = createQueue<JobPayload, JobResult>({ name: "email" }, 
 import { emailQueue } from "./emailQueue";
 
 const main = async () => {
-  const job = await emailQueue.enqueue({ email: "foo@bar.com" });
+  const job = await emailQueue.add({ email: "foo@bar.com" });
 };
 
 main();
@@ -111,6 +102,17 @@ const main = async () => {
 };
 
 main();
+```
+
+## Troubleshooting
+
+1. If you use an old version of Prisma ranging from 2.29.0 to 4.6.1 (included), you must first add `"interactiveTransactions"` to your `schema.prisma` client configuration:
+
+```prisma
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["interactiveTransactions"]
+}
 ```
 
 ## Authors

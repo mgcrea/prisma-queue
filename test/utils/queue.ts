@@ -21,9 +21,9 @@ export const createEmailQueue = (
   } = options;
   globalQueueIndex++;
   return createQueue<JobPayload, JobResult>(
+    name,
     {
       prisma,
-      name,
       pollInterval,
       ...otherOptions,
     },

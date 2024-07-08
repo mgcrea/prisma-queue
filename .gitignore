@@ -3,6 +3,7 @@ data/
 dist/
 lib/
 node_modules/
+coverage/
 .vscode/
 .idea/
 *.tsbuildinfo

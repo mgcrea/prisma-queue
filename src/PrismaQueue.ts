@@ -68,7 +68,6 @@ export class PrismaQueue<
   U extends JobResult = JobResult,
 > extends EventEmitter {
   #prisma: PrismaClient;
-  private name: string;
   private config: Required<Omit<PrismaQueueOptions, "name" | "prisma">>;
 
   private concurrency = 0;
@@ -80,14 +79,14 @@ export class PrismaQueue<
    * @param worker - The worker function that processes jobs.
    */
   public constructor(
+    private name: string = "default",
     private options: PrismaQueueOptions = {},
-    public worker: JobWorker<T, U>,
+    private worker?: JobWorker<T, U>,
   ) {
     super();
 
     const {
       prisma = new PrismaClient(),
-      name = "default",
       modelName = "QueueJob",
       tableName = getTableName(modelName),
       maxAttempts = null,
@@ -124,6 +123,11 @@ export class PrismaQueue<
         error,
       ),
     );
+  }
+
+  public setWorker(worker: JobWorker<T, U>): PrismaQueue<T, U> {
+    this.worker = worker;
+    return this;
   }
 
   /**
