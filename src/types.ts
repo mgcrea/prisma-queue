@@ -1,7 +1,6 @@
 import type { Prisma, PrismaClient, QueueJob as PrismaQueueJob } from "@prisma/client";
 import type { PrismaJob } from "./PrismaJob";
 
-// eslint-disable-next-line @typescript-eslint/ban-types
 export type Simplify<T> = { [KeyType in keyof T]: T[KeyType] } & {};
 
 export type JobPayload = Prisma.InputJsonValue;

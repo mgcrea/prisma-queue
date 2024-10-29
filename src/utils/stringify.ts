@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import type { Prisma } from "@prisma/client";
 
 type InputJsonValue = Prisma.InputJsonValue;
@@ -49,9 +50,9 @@ export function restoreFromJson<T = unknown>(preparedValue: InputJsonValue): T {
     } else if (preparedValue["$type"] === "bigint") {
       return BigInt(preparedValue["$value"] as string) as T;
     } else if (preparedValue["$type"] === "Map") {
-      return new Map(preparedValue["$value"] as Array<[unknown, unknown]>) as T;
+      return new Map(preparedValue["$value"] as [unknown, unknown][]) as T;
     } else if (preparedValue["$type"] === "Set") {
-      return new Set(preparedValue["$value"] as Array<unknown>) as T;
+      return new Set(preparedValue["$value"] as unknown[]) as T;
     } else if (preparedValue["$type"] === "Date") {
       return new Date(preparedValue["$value"] as number) as T;
     }
@@ -61,7 +62,8 @@ export function restoreFromJson<T = unknown>(preparedValue: InputJsonValue): T {
     } else {
       const copy: Record<string, unknown> = {};
       for (const key in preparedValue) {
-        copy[key] = restoreFromJson((preparedValue as InputJsonObject)[key] as InputJsonValue) as T;
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        copy[key] = restoreFromJson((preparedValue as InputJsonObject)[key]!);
       }
       return copy as T;
     }

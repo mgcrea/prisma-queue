@@ -28,7 +28,7 @@ export class PrismaJob<T, U> {
     this.#model = model;
     this.#client = client;
     this.#record = record;
-    this.id = record["id"];
+    this.id = record.id;
   }
 
   /**

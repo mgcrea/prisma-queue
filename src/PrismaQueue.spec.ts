@@ -35,15 +35,15 @@ describe("PrismaQueue", () => {
   });
   describe("enqueue", () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
-    beforeAll(async () => {
+    beforeAll(() => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
       await prisma.queueJob.deleteMany();
-      queue.start();
+      void queue.start();
     });
-    afterEach(async () => {
-      queue.stop();
+    afterEach(() => {
+      void queue.stop();
     });
     it("should properly enqueue a job", async () => {
       const job = await queue.enqueue({ email: "foo@bar.com" });
@@ -55,8 +55,8 @@ describe("PrismaQueue", () => {
       `);
       const record = await job.fetch();
       expect(record.key).toBeNull();
-      expect(record?.payload).toEqual({ email: "foo@bar.com" });
-      expect(record?.runAt).toBeInstanceOf(Date);
+      expect(record.payload).toEqual({ email: "foo@bar.com" });
+      expect(record.runAt).toBeInstanceOf(Date);
     });
 
     it("should properly enqueue a job with a custom key", async () => {
@@ -68,23 +68,23 @@ describe("PrismaQueue", () => {
         ]
       `);
       const record = await job.fetch();
-      expect(record?.payload).toEqual({ email: "foo@bar.com" });
-      expect(record?.runAt).toBeInstanceOf(Date);
+      expect(record.payload).toEqual({ email: "foo@bar.com" });
+      expect(record.runAt).toBeInstanceOf(Date);
       expect(record.key).toBe("custom-key");
     });
   });
 
   describe("schedule", () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
-    beforeAll(async () => {
+    beforeAll(() => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
       await prisma.queueJob.deleteMany();
-      queue.start();
+      void queue.start();
     });
-    afterEach(async () => {
-      queue.stop();
+    afterEach(() => {
+      void queue.stop();
     });
     it("should properly schedule a recurring job", async () => {
       const job = await queue.schedule(
@@ -94,15 +94,15 @@ describe("PrismaQueue", () => {
       expect(job).toBeInstanceOf(PrismaJob);
       const record = await job.fetch();
       expect(record).toBeDefined();
-      expect(record?.runAt.getHours()).toBe(5);
-      expect(record?.runAt.getMinutes()).toBe(5);
+      expect(record.runAt.getHours()).toBe(5);
+      expect(record.runAt.getMinutes()).toBe(5);
     });
     it("should properly re-enqueue a recurring job", async () => {
       await queue.schedule(
         { key: "email-schedule", cron: "5 5 * * *", runAt: new Date() },
         { email: "foo@bar.com" },
       );
-      queue.start();
+      void queue.start();
       await waitForNextEvent(queue, "enqueue");
       const jobs = await prisma.queueJob.findMany({ where: { key: "email-schedule" } });
       expect(jobs.length).toBe(2);
@@ -129,15 +129,15 @@ describe("PrismaQueue", () => {
 
   describe("dequeue", () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
-    beforeAll(async () => {
+    beforeAll(() => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
       await prisma.queueJob.deleteMany();
-      queue.start();
+      void queue.start();
     });
-    afterEach(async () => {
-      queue.stop();
+    afterEach(() => {
+      void queue.stop();
     });
     it("should properly dequeue a successful job", async () => {
       queue.worker = vi.fn(async (_job) => {
@@ -149,10 +149,11 @@ describe("PrismaQueue", () => {
       expect(queue.worker).toHaveBeenCalledTimes(1);
       expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), expect.any(PrismaClient));
       const record = await job.fetch();
-      expect(record?.finishedAt).toBeInstanceOf(Date);
+      expect(record.finishedAt).toBeInstanceOf(Date);
     });
     it("should properly dequeue a failed job", async () => {
       let error: Error | null = null;
+      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async (_job) => {
         error = new Error("failed");
         throw error;
@@ -162,8 +163,8 @@ describe("PrismaQueue", () => {
       expect(queue.worker).toHaveBeenCalledTimes(1);
       expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), expect.any(PrismaClient));
       const record = await job.fetch();
-      expect(record?.finishedAt).toBeNull();
-      expect(record?.error).toEqual(serializeError(error));
+      expect(record.finishedAt).toBeNull();
+      expect(record.error).toEqual(serializeError(error));
     });
     it("should properly dequeue multiple jobs in a row", async () => {
       const JOB_WAIT = 50;
@@ -181,7 +182,7 @@ describe("PrismaQueue", () => {
     });
     it("should properly handle multiple restarts", async () => {
       const JOB_WAIT = 50;
-      await queue.stop();
+      void queue.stop();
       queue.worker = vi.fn(async (_job) => {
         await waitFor(JOB_WAIT);
         return { code: "200" };
@@ -190,34 +191,35 @@ describe("PrismaQueue", () => {
         queue.enqueue({ email: "foo1@bar1.com" }),
         queue.enqueue({ email: "foo2@bar2.com" }),
       ]);
-      queue.start();
+      void queue.start();
       expect(queue.worker).toHaveBeenCalledTimes(0);
-      await queue.stop();
-      queue.start();
+      void queue.stop();
+      void queue.start();
       await waitFor(10);
       expect(queue.worker).toHaveBeenCalledTimes(1);
       await waitFor(JOB_WAIT + 10);
       expect(queue.worker).toHaveBeenCalledTimes(1);
     });
     afterAll(() => {
-      queue.stop();
+      void queue.stop();
     });
   });
 
   describe("deleteOn", () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
     describe("success", () => {
-      beforeAll(async () => {
+      beforeAll(() => {
         queue = createEmailQueue({ deleteOn: "success" });
       });
       beforeEach(async () => {
         await prisma.queueJob.deleteMany();
-        queue.start();
+        void queue.start();
       });
-      afterEach(async () => {
-        queue.stop();
+      afterEach(() => {
+        void queue.stop();
       });
       it("should properly dequeue a successful job", async () => {
+        // eslint-disable-next-line @typescript-eslint/require-await
         queue.worker = vi.fn(async (_job) => {
           return { code: "200" };
         });
@@ -228,22 +230,23 @@ describe("PrismaQueue", () => {
         expect(record).toBeNull();
       });
       afterAll(() => {
-        queue.stop();
+        void queue.stop();
       });
     });
     describe("failure", () => {
-      beforeAll(async () => {
+      beforeAll(() => {
         queue = createEmailQueue({ deleteOn: "failure" });
       });
       beforeEach(async () => {
         await prisma.queueJob.deleteMany();
-        queue.start();
+        void queue.start();
       });
-      afterEach(async () => {
-        queue.stop();
+      afterEach(() => {
+        void queue.stop();
       });
       it("should properly dequeue a failed job", async () => {
         let error: Error | null = null;
+        // eslint-disable-next-line @typescript-eslint/require-await
         queue.worker = vi.fn(async (_job) => {
           error = new Error("failed");
           throw error;
@@ -255,21 +258,22 @@ describe("PrismaQueue", () => {
         expect(record).toBeNull();
       });
       afterAll(() => {
-        queue.stop();
+        void queue.stop();
       });
     });
     describe("always", () => {
-      beforeAll(async () => {
+      beforeAll(() => {
         queue = createEmailQueue({ deleteOn: "always" });
       });
       beforeEach(async () => {
         await prisma.queueJob.deleteMany();
-        queue.start();
+        void queue.start();
       });
-      afterEach(async () => {
-        queue.stop();
+      afterEach(() => {
+        void queue.stop();
       });
       it("should properly dequeue a successful job", async () => {
+        // eslint-disable-next-line @typescript-eslint/require-await
         queue.worker = vi.fn(async (_job) => {
           return { code: "200" };
         });
@@ -281,6 +285,7 @@ describe("PrismaQueue", () => {
       });
       it("should properly dequeue a failed job", async () => {
         let error: Error | null = null;
+        // eslint-disable-next-line @typescript-eslint/require-await
         queue.worker = vi.fn(async (_job) => {
           error = new Error("failed");
           throw error;
@@ -292,22 +297,22 @@ describe("PrismaQueue", () => {
         expect(record).toBeNull();
       });
       afterAll(() => {
-        queue.stop();
+        void queue.stop();
       });
     });
   });
 
   describe("maxConcurrency", () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
-    beforeAll(async () => {
+    beforeAll(() => {
       queue = createEmailQueue({ maxConcurrency: 2 });
     });
     beforeEach(async () => {
       await prisma.queueJob.deleteMany();
-      queue.start();
+      void queue.start();
     });
-    afterEach(async () => {
-      queue.stop();
+    afterEach(() => {
+      void queue.stop();
     });
     it("should properly dequeue multiple jobs in a row according to maxConcurrency", async () => {
       const JOB_WAIT = 100;
@@ -324,29 +329,30 @@ describe("PrismaQueue", () => {
       expect(queue.worker).toHaveBeenNthCalledWith(2, expect.any(PrismaJob), expect.any(PrismaClient));
     });
     afterAll(() => {
-      queue.stop();
+      void queue.stop();
     });
   });
 
   describe("priority", () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
-    beforeAll(async () => {
+    beforeAll(() => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
       await prisma.queueJob.deleteMany();
-      // queue.start();
+      // void queue.start();
     });
-    afterEach(async () => {
-      queue.stop();
+    afterEach(() => {
+      void queue.stop();
     });
     it("should properly prioritize a job with a lower priority", async () => {
+      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async (_job) => {
         return { code: "200" };
       });
       await queue.enqueue({ email: "foo@bar.com" });
       await queue.enqueue({ email: "baz@bar.com" }, { priority: -1 });
-      queue.start();
+      void queue.start();
       await waitForNthJob(queue, 2);
       expect(queue.worker).toHaveBeenCalledTimes(2);
       expect(queue.worker).toHaveBeenNthCalledWith(
@@ -365,50 +371,50 @@ describe("PrismaQueue", () => {
       );
     });
     afterAll(() => {
-      queue.stop();
+      void queue.stop();
     });
   });
 
   describe("Job.progress()", () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
-    beforeAll(async () => {
+    beforeAll(() => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
       await prisma.queueJob.deleteMany();
-      queue.start();
+      void queue.start();
     });
-    afterEach(async () => {
-      queue.stop();
+    afterEach(() => {
+      void queue.stop();
     });
     it("should properly update job progress", async () => {
-      queue.worker = vi.fn(async (job) => {
+      queue.worker = vi.fn(async (job: PrismaJob<JobPayload, JobResult>) => {
         debug("working...", job.id, job.payload);
         await job.progress(50);
         throw new Error("failed");
       });
       const job = await queue.enqueue({ email: "foo@bar.com" });
-      queue.start();
+      void queue.start();
       await waitForNextJob(queue);
       const record = await job.fetch();
-      expect(record?.progress).toBe(50);
+      expect(record.progress).toBe(50);
     });
     afterAll(() => {
-      queue.stop();
+      void queue.stop();
     });
   });
 
   describe("Job.isLocked()", () => {
     let queue: PrismaQueue<JobPayload, JobResult>;
-    beforeAll(async () => {
+    beforeAll(() => {
       queue = createEmailQueue({ pollInterval: 200 });
     });
     beforeEach(async () => {
       await prisma.queueJob.deleteMany();
-      queue.start();
+      void queue.start();
     });
-    afterEach(async () => {
-      queue.stop();
+    afterEach(() => {
+      void queue.stop();
     });
     it("should be toggled", async () => {
       queue.worker = vi.fn(async (_job) => {
@@ -422,7 +428,7 @@ describe("PrismaQueue", () => {
       expect(await job.isLocked()).toBe(false);
     });
     afterAll(() => {
-      queue.stop();
+      void queue.stop();
     });
   });
 });

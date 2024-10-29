@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Prisma, PrismaClient } from "@prisma/client";
 import { Cron } from "croner";
 import { EventEmitter } from "events";
@@ -48,6 +49,7 @@ export type PrismaQueueEvents<T extends JobPayload = JobPayload, U extends JobRe
   error: (error: unknown, job?: PrismaJob<T, U>) => void;
 };
 
+// eslint-disable-next-line @typescript-eslint/consistent-type-definitions
 export interface PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult = JobResult> {
   on<E extends keyof PrismaQueueEvents<T, U>>(event: E, listener: PrismaQueueEvents<T, U>[E]): this;
   once<E extends keyof PrismaQueueEvents<T, U>>(event: E, listener: PrismaQueueEvents<T, U>[E]): this;
@@ -116,14 +118,14 @@ export class PrismaQueue<
     };
 
     // Default error handler
-    this.on("error", (error, job) =>
+    this.on("error", (error, job) => {
       debug(
         job
           ? `Job with id=${job.id} failed for queue named="${this.name}" with error`
           : `Queue named="${this.name}" encountered an unexpected error`,
         error,
-      ),
-    );
+      );
+    });
   }
 
   /**
@@ -163,6 +165,7 @@ export class PrismaQueue<
    * @param payloadOrFunction - The job payload or a function that returns a job payload.
    * @param options - Options for the job, such as scheduling and attempts.
    */
+  // eslint-disable-next-line @typescript-eslint/unbound-method
   public add = this.enqueue;
 
   /**
@@ -220,7 +223,7 @@ export class PrismaQueue<
   ): Promise<PrismaJob<T, U>> {
     debug(`schedule`, this.name, options, payloadOrFunction);
     const { key, cron, runAt: firstRunAt, ...otherOptions } = options;
-    const runAt = firstRunAt || new Cron(cron).nextRun();
+    const runAt = firstRunAt ?? new Cron(cron).nextRun();
     assert(runAt, `Failed to find a future occurence for given cron`);
     return this.enqueue(payloadOrFunction, { key, cron, runAt, ...otherOptions });
   }
@@ -254,7 +257,7 @@ export class PrismaQueue<
           // debug(`concurrency=${this.concurrency}, maxConcurrency=${maxConcurrency}`);
           debug(`processing job from queue named="${this.name}"...`);
           this.concurrency++;
-          setImmediate(() =>
+          setImmediate(() => {
             this.dequeue()
               .then((job) => {
                 if (job) {
@@ -265,13 +268,13 @@ export class PrismaQueue<
                   estimatedQueueSize = 0;
                 }
               })
-              .catch((error) => {
+              .catch((error: unknown) => {
                 this.emit("error", error);
               })
               .finally(() => {
                 this.concurrency--;
-              }),
-          );
+              });
+          });
           await waitFor(jobInterval);
         }
         await waitFor(jobInterval * 2);
@@ -341,7 +344,7 @@ export class PrismaQueue<
         } catch (error) {
           const date = new Date();
           debug(
-            `failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${error}"`,
+            `failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${String(error)}"`,
           );
           const isFinished = maxAttempts && attempts >= maxAttempts;
           const notBefore = new Date(date.getTime() + calculateDelay(attempts));

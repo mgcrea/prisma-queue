@@ -10,7 +10,7 @@ export const serializeError = (err: unknown) => {
   }
   return {
     name: "UnknownError",
-    message: `${err}`,
+    message: String(err),
     stack: undefined,
   };
 };

@@ -10,6 +10,7 @@ let globalQueueIndex = 0;
 
 export const createEmailQueue = (
   options: PrismaQueueOptions = {},
+  // eslint-disable-next-line @typescript-eslint/require-await
   worker: JobWorker<JobPayload, JobResult> = async (_job) => {
     return { code: "200" };
   },
