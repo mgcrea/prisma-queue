@@ -54,8 +54,23 @@ describe("PrismaQueue", () => {
         ]
       `);
       const record = await job.fetch();
+      expect(record.key).toBeNull();
       expect(record?.payload).toEqual({ email: "foo@bar.com" });
       expect(record?.runAt).toBeInstanceOf(Date);
+    });
+
+    it("should properly enqueue a job with a custom key", async () => {
+      const job = await queue.enqueue({ email: "foo@bar.com" }, { key: "custom-key" });
+      expect(job).toBeInstanceOf(PrismaJob);
+      expect(Object.keys(job)).toMatchInlineSnapshot(`
+        [
+          "id",
+        ]
+      `);
+      const record = await job.fetch();
+      expect(record?.payload).toEqual({ email: "foo@bar.com" });
+      expect(record?.runAt).toBeInstanceOf(Date);
+      expect(record.key).toBe("custom-key");
     });
   });
 

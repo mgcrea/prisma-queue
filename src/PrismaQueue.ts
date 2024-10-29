@@ -176,11 +176,11 @@ export class PrismaQueue<
   ): Promise<PrismaJob<T, U>> {
     debug(`enqueue`, this.name, payloadOrFunction, options);
     const { name: queueName, config } = this;
-    const { key, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
+    const { key = null, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
     const record = await this.#prisma.$transaction(async (client) => {
       const payload =
         payloadOrFunction instanceof Function ? await payloadOrFunction(client) : payloadOrFunction;
-      const data = { queue: queueName, cron, payload, maxAttempts, priority };
+      const data = { queue: queueName, cron, payload, maxAttempts, priority, key };
       if (key && runAt) {
         const { count } = await this.model.deleteMany({
           where: {
@@ -198,7 +198,7 @@ export class PrismaQueue<
         const update = { ...data, ...(runAt ? { runAt } : {}) };
         return await this.model.upsert({
           where: { key_runAt: { key, runAt } },
-          create: { key, ...update },
+          create: { ...update },
           update,
         });
       }
