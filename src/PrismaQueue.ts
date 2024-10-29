@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from "@prisma/client";
-import Cron from "croner";
+import { Cron } from "croner";
 import { EventEmitter } from "events";
 import assert from "node:assert";
 import { PrismaJob } from "./PrismaJob";
@@ -220,7 +220,7 @@ export class PrismaQueue<
   ): Promise<PrismaJob<T, U>> {
     debug(`schedule`, this.name, options, payloadOrFunction);
     const { key, cron, runAt: firstRunAt, ...otherOptions } = options;
-    const runAt = firstRunAt || Cron(cron).nextRun();
+    const runAt = firstRunAt || new Cron(cron).nextRun();
     assert(runAt, `Failed to find a future occurence for given cron`);
     return this.enqueue(payloadOrFunction, { key, cron, runAt, ...otherOptions });
   }
