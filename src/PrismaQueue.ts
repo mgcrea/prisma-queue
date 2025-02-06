@@ -180,10 +180,11 @@ export class PrismaQueue<
     debug(`enqueue`, this.name, payloadOrFunction, options);
     const { name: queueName, config } = this;
     const { key = null, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
+    const currentDate = new Date();
     const record = await this.#prisma.$transaction(async (client) => {
       const payload =
         payloadOrFunction instanceof Function ? await payloadOrFunction(client) : payloadOrFunction;
-      const data = { queue: queueName, cron, payload, maxAttempts, priority, key };
+      const data = { queue: queueName, cron, payload, maxAttempts, priority, key, createdAt: currentDate };
       if (key && runAt) {
         const { count } = await this.model.deleteMany({
           where: {
@@ -198,14 +199,14 @@ export class PrismaQueue<
         if (count > 0) {
           debug(`deleted ${count} conflicting upcoming queue jobs`);
         }
-        const update = { ...data, ...(runAt ? { runAt } : {}) };
+        const update = { ...data, ...(runAt ? { runAt } : { runAt: currentDate }) };
         return await this.model.upsert({
           where: { key_runAt: { key, runAt } },
           create: { ...update },
           update,
         });
       }
-      return await this.model.create({ data });
+      return await this.model.create({ data: { ...data, runAt: currentDate } });
     });
     const job = new PrismaJob(record as DatabaseJob<T, U>, { model: this.model, client: this.#prisma });
     this.emit("enqueue", job);
@@ -295,6 +296,7 @@ export class PrismaQueue<
     const { tableName: tableNameRaw, deleteOn, alignTimeZone } = this.config;
     const tableName = escape(tableNameRaw);
     const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
+    const currentDate = new Date().toISOString();
     const job = await this.#prisma.$transaction(
       async (client) => {
         if (alignTimeZone) {
@@ -306,15 +308,16 @@ export class PrismaQueue<
             await client.$executeRawUnsafe(`SET LOCAL TIME ZONE '${localTimeZone}';`);
           }
         }
+
         const rows = await client.$queryRawUnsafe<DatabaseJob<T, U>[]>(
-          `UPDATE ${tableName} SET "processedAt" = NOW(), "attempts" = "attempts" + 1
+          `UPDATE ${tableName} SET "processedAt" = '${currentDate}', "attempts" = "attempts" + 1
            WHERE id = (
              SELECT id
              FROM ${tableName}
              WHERE (${tableName}."queue" = $1)
                AND (${tableName}."finishedAt" IS NULL)
-               AND (${tableName}."runAt" < NOW())
-               AND (${tableName}."notBefore" IS NULL OR ${tableName}."notBefore" < NOW())
+               AND (${tableName}."runAt" < '${currentDate}')
+               AND (${tableName}."notBefore" IS NULL OR ${tableName}."notBefore" < '${currentDate}')
              ORDER BY ${tableName}."priority" ASC, ${tableName}."runAt" ASC
              FOR UPDATE SKIP LOCKED
              LIMIT 1

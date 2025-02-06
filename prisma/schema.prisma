@@ -23,7 +23,7 @@ model QueueJob {
   priority    Int       @default(0)
   attempts    Int       @default(0)
   maxAttempts Int?
-  runAt       DateTime  @default(now())
+  runAt       DateTime
   notBefore   DateTime?
   finishedAt  DateTime?
   processedAt DateTime?
