@@ -6,6 +6,7 @@ import assert from "node:assert";
 import { PrismaJob } from "./PrismaJob";
 import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker } from "./types";
 import {
+  AbortError,
   calculateDelay,
   debug,
   escape,
@@ -75,6 +76,7 @@ export class PrismaQueue<
 
   private concurrency = 0;
   private stopped = true;
+  private abortController = new AbortController();
 
   /**
    * Constructs a PrismaQueue object with specified options and a worker function.
@@ -153,11 +155,14 @@ export class PrismaQueue<
    * Stops the job processing in the queue.
    */
   public async stop(): Promise<void> {
-    const { pollInterval } = this.config;
-    debug(`stopping queue named="${this.name}"...`);
+    // const { pollInterval } = this.config;
+    debug(`stopping queue named="${this.name}"...`);    
     this.stopped = true;
+    this.abortController.abort();
+
     // Wait for the queue to stop
-    await waitFor(pollInterval);
+
+    //await waitFor(pollInterval);
   }
 
   /**
@@ -238,16 +243,19 @@ export class PrismaQueue<
       `polling queue named="${this.name}" with pollInterval=${pollInterval} maxConcurrency=${maxConcurrency}...`,
     );
 
-    while (!this.stopped) {
-      // Wait for the queue to be ready
-      if (this.concurrency >= maxConcurrency) {
-        await waitFor(pollInterval);
+    // If we get AbortError, we will stop the polling, but make sure we don't throw an error
+
+    try {
+      while (!this.stopped) {
+        // Wait for the queue to be ready
+        if (this.concurrency >= maxConcurrency) {
+        await waitFor(pollInterval, this.abortController.signal);
         continue;
       }
       // Query the queue size only when needed to reduce database load.
       let estimatedQueueSize = await this.size(true);
       if (estimatedQueueSize === 0) {
-        await waitFor(pollInterval);
+        await waitFor(pollInterval, this.abortController.signal);
         continue;
       }
 
@@ -276,12 +284,20 @@ export class PrismaQueue<
                 this.concurrency--;
               });
           });
-          await waitFor(jobInterval);
+          await waitFor(jobInterval, this.abortController.signal);
         }
-        await waitFor(jobInterval * 2);
+        await waitFor(jobInterval * 2, this.abortController.signal);
       }
+    } 
+  } catch (error) {
+    if (error instanceof AbortError) {
+      debug(`polling for queue named="${this.name}" was aborted`);
+    } 
+    else {
+      throw error;
     }
   }
+}
 
   /**
    * Dequeues and processes the next job in the queue. Handles locking and error management internally.
