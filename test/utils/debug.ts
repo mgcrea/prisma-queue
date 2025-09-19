@@ -1,4 +1,3 @@
-/* eslint-disable no-var */
 import { fsyncSync, writeSync } from "node:fs";
 import { inspect } from "util";
 

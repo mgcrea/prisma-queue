@@ -61,9 +61,8 @@ export function restoreFromJson<T = unknown>(preparedValue: InputJsonValue): T {
       return preparedValue.map(restoreFromJson) as T;
     } else {
       const copy: Record<string, unknown> = {};
-      for (const key in preparedValue) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        copy[key] = restoreFromJson((preparedValue as InputJsonObject)[key]!);
+      for (const [key, value] of Object.entries(preparedValue)) {
+        copy[key] = restoreFromJson(value as InputJsonObject);
       }
       return copy as T;
     }

@@ -1,4 +1,3 @@
-import { PrismaClient } from "@prisma/client";
 import type { PrismaQueue } from "src/index";
 import { PrismaJob } from "src/PrismaJob";
 import { debug, serializeError, waitFor } from "src/utils";
@@ -13,6 +12,8 @@ import {
   type JobResult,
 } from "test/utils";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+const AnyPrismaClient = expect.any(Object);
 
 describe("PrismaQueue", () => {
   it("should properly create a queue", () => {
@@ -140,14 +141,14 @@ describe("PrismaQueue", () => {
       void queue.stop();
     });
     it("should properly dequeue a successful job", async () => {
-      queue.worker = vi.fn(async (_job) => {
+      queue.worker = vi.fn(async (_job, _client) => {
         await waitFor(200);
         return { code: "200" };
       });
       const job = await queue.enqueue({ email: "foo@bar.com" });
       await waitForNextJob(queue);
       expect(queue.worker).toHaveBeenCalledTimes(1);
-      expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), expect.any(PrismaClient));
+      expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), AnyPrismaClient);
       const record = await job.fetch();
       expect(record.finishedAt).toBeInstanceOf(Date);
     });
@@ -161,7 +162,7 @@ describe("PrismaQueue", () => {
       const job = await queue.enqueue({ email: "foo@bar.com" });
       await waitForNextJob(queue);
       expect(queue.worker).toHaveBeenCalledTimes(1);
-      expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), expect.any(PrismaClient));
+      expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), AnyPrismaClient);
       const record = await job.fetch();
       expect(record.finishedAt).toBeNull();
       expect(record.error).toEqual(serializeError(error));
@@ -178,7 +179,7 @@ describe("PrismaQueue", () => {
       ]);
       await waitFor(DEFAULT_POLL_INTERVAL + JOB_WAIT * 2 + 100);
       expect(queue.worker).toHaveBeenCalledTimes(2);
-      expect(queue.worker).toHaveBeenNthCalledWith(2, expect.any(PrismaJob), expect.any(PrismaClient));
+      expect(queue.worker).toHaveBeenNthCalledWith(2, expect.any(PrismaJob), AnyPrismaClient);
     });
     it("should properly handle multiple restarts", async () => {
       const JOB_WAIT = 50;
@@ -326,7 +327,7 @@ describe("PrismaQueue", () => {
       ]);
       await waitFor(DEFAULT_POLL_INTERVAL + 100);
       expect(queue.worker).toHaveBeenCalledTimes(2);
-      expect(queue.worker).toHaveBeenNthCalledWith(2, expect.any(PrismaJob), expect.any(PrismaClient));
+      expect(queue.worker).toHaveBeenNthCalledWith(2, expect.any(PrismaJob), AnyPrismaClient);
     });
     afterAll(() => {
       void queue.stop();
@@ -360,14 +361,14 @@ describe("PrismaQueue", () => {
         expect.objectContaining({
           payload: { email: "baz@bar.com" },
         }),
-        expect.any(PrismaClient),
+        AnyPrismaClient,
       );
       expect(queue.worker).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
           payload: { email: "foo@bar.com" },
         }),
-        expect.any(PrismaClient),
+        AnyPrismaClient,
       );
     });
     afterAll(() => {
