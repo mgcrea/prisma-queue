@@ -1,4 +1,4 @@
-import { fsyncSync, writeSync } from "node:fs";
+import { writeSync } from "node:fs";
 import { inspect } from "util";
 
 declare global {
@@ -9,7 +9,7 @@ declare global {
 
 globalThis.p = (s: string) => {
   writeSync(1, `\n${s}`);
-  fsyncSync(1);
+  // fsyncSync(1);
 };
 globalThis.d = (...args: unknown[]) => {
   p("🔴 " + inspect(args.length > 1 ? args : args[0], { colors: true, depth: 10 }) + "\n");

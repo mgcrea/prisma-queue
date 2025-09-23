@@ -331,7 +331,6 @@ export class PrismaQueue<
         const job = new PrismaJob<T, U>(rows[0], { model: client[queueJobKey], client });
         let result;
         try {
-          assert(this.worker, "Missing queue worker to process job");
           debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
           result = await this.worker(job, this.#prisma);
           debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
