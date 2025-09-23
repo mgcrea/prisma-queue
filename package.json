@@ -29,7 +29,7 @@
   ],
   "scripts": {
     "start": "DEBUG=prisma-queue,prisma-query vitest",
-    "build": "tsup --entry src/index.ts --format cjs,esm --sourcemap --dts --clean --entry src/bin/cli.ts",
+    "build": "tsup",
     "lint": "eslint src/ test/",
     "prettycheck": "prettier --check src/ test/",
     "prettify": "prettier --write src/ test/",
