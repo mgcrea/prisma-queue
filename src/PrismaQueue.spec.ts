@@ -8,8 +8,8 @@ import {
   waitForNextEvent,
   waitForNextJob,
   waitForNthJob,
-  type JobPayload,
-  type JobResult,
+  type EmailJobPayload,
+  type EmailJobResult,
 } from "test/utils";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -35,7 +35,7 @@ describe("PrismaQueue", () => {
     `);
   });
   describe("enqueue", () => {
-    let queue: PrismaQueue<JobPayload, JobResult>;
+    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
     beforeAll(() => {
       queue = createEmailQueue();
     });
@@ -76,7 +76,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("schedule", () => {
-    let queue: PrismaQueue<JobPayload, JobResult>;
+    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
     beforeAll(() => {
       queue = createEmailQueue();
     });
@@ -129,7 +129,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("dequeue", () => {
-    let queue: PrismaQueue<JobPayload, JobResult>;
+    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
     beforeAll(() => {
       queue = createEmailQueue();
     });
@@ -207,7 +207,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("deleteOn", () => {
-    let queue: PrismaQueue<JobPayload, JobResult>;
+    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
     describe("success", () => {
       beforeAll(() => {
         queue = createEmailQueue({ deleteOn: "success" });
@@ -304,7 +304,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("maxConcurrency", () => {
-    let queue: PrismaQueue<JobPayload, JobResult>;
+    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
     beforeAll(() => {
       queue = createEmailQueue({ maxConcurrency: 2 });
     });
@@ -335,7 +335,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("priority", () => {
-    let queue: PrismaQueue<JobPayload, JobResult>;
+    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
     beforeAll(() => {
       queue = createEmailQueue();
     });
@@ -377,7 +377,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("Job.progress()", () => {
-    let queue: PrismaQueue<JobPayload, JobResult>;
+    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
     beforeAll(() => {
       queue = createEmailQueue();
     });
@@ -389,7 +389,7 @@ describe("PrismaQueue", () => {
       void queue.stop();
     });
     it("should properly update job progress", async () => {
-      queue.worker = vi.fn(async (job: PrismaJob<JobPayload, JobResult>) => {
+      queue.worker = vi.fn(async (job: PrismaJob<EmailJobPayload, EmailJobResult>) => {
         debug("working...", job.id, job.payload);
         await job.progress(50);
         throw new Error("failed");
@@ -406,7 +406,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("Job.isLocked()", () => {
-    let queue: PrismaQueue<JobPayload, JobResult>;
+    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
     beforeAll(() => {
       queue = createEmailQueue({ pollInterval: 200 });
     });

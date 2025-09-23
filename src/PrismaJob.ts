@@ -11,10 +11,10 @@ export type PrismaJobOptions = {
 /**
  * Represents a job within a Prisma-managed queue.
  */
-export class PrismaJob<T, U> {
+export class PrismaJob<Payload, Result> {
   #model: Prisma.QueueJobDelegate;
   #client: PrismaLightClient;
-  #record: DatabaseJob<T, U>;
+  #record: DatabaseJob<Payload, Result>;
 
   public readonly id;
 
@@ -24,7 +24,7 @@ export class PrismaJob<T, U> {
    * @param model - The Prisma delegate used for database operations related to the job.
    * @param client - The Prisma client for executing arbitrary queries.
    */
-  constructor(record: DatabaseJob<T, U>, { model, client }: PrismaJobOptions) {
+  constructor(record: DatabaseJob<Payload, Result>, { model, client }: PrismaJobOptions) {
     this.#model = model;
     this.#client = client;
     this.#record = record;
@@ -35,7 +35,7 @@ export class PrismaJob<T, U> {
    * Internal method to assign a new record to the job.
    * @param record - Optional new record to assign.
    */
-  #assign(record?: DatabaseJob<T, U>) {
+  #assign(record?: DatabaseJob<Payload, Result>) {
     if (record) {
       this.#record = record;
     }
@@ -44,7 +44,7 @@ export class PrismaJob<T, U> {
   /**
    * Gets the current job record.
    */
-  public get record(): DatabaseJob<T, U> {
+  public get record(): DatabaseJob<Payload, Result> {
     return this.#record;
   }
 
@@ -94,17 +94,17 @@ export class PrismaJob<T, U> {
    * Updates the job's progress percentage.
    * @param progress - The new progress percentage.
    */
-  public async progress(progress: number): Promise<DatabaseJob<T, U>> {
+  public async progress(progress: number): Promise<DatabaseJob<Payload, Result>> {
     return await this.update({ progress: Math.max(0, Math.min(100, progress)) });
   }
 
   /**
    * Fetches the latest job record from the database and updates the internal state.
    */
-  public async fetch(): Promise<DatabaseJob<T, U>> {
+  public async fetch(): Promise<DatabaseJob<Payload, Result>> {
     const record = (await this.#model.findUnique({
       where: { id: this.id },
-    })) as DatabaseJob<T, U>;
+    })) as DatabaseJob<Payload, Result>;
     this.#assign(record);
     return record;
   }
@@ -113,11 +113,11 @@ export class PrismaJob<T, U> {
    * Updates the job record in the database with new data.
    * @param data - The new data to be merged with the existing job record.
    */
-  public async update(data: Prisma.QueueJobUpdateInput): Promise<DatabaseJob<T, U>> {
+  public async update(data: Prisma.QueueJobUpdateInput): Promise<DatabaseJob<Payload, Result>> {
     const record = (await this.#model.update({
       where: { id: this.id },
       data,
-    })) as DatabaseJob<T, U>;
+    })) as DatabaseJob<Payload, Result>;
     this.#assign(record);
     return record;
   }
@@ -125,10 +125,10 @@ export class PrismaJob<T, U> {
   /**
    * Deletes the job from the database.
    */
-  public async delete(): Promise<DatabaseJob<T, U>> {
+  public async delete(): Promise<DatabaseJob<Payload, Result>> {
     const record = (await this.#model.delete({
       where: { id: this.id },
-    })) as DatabaseJob<T, U>;
+    })) as DatabaseJob<Payload, Result>;
     return record;
   }
 
