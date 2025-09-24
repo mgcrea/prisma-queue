@@ -17,6 +17,7 @@ export class PrismaJob<Payload, Result> {
   #record: DatabaseJob<Payload, Result>;
 
   public readonly id;
+  public readonly createdAt: Date = new Date();
 
   /**
    * Constructs a new PrismaJob instance with the provided job record and database access objects.
@@ -53,6 +54,13 @@ export class PrismaJob<Payload, Result> {
    */
   public get key() {
     return this.#record.key;
+  }
+
+  /**
+   * Gets the job's queue name.
+   */
+  public get queue() {
+    return this.#record.queue;
   }
 
   /**

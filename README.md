@@ -113,6 +113,97 @@ const main = async () => {
 main();
 ```
 
+## Advanced usage
+
+### Threading
+
+You can easily spin of your workers in separate threads using [worker_threads](https://nodejs.org/api/worker_threads.html#worker-threads) (Node.js >= 12.17.0).
+
+It enables you to fully leverage your CPU cores and isolate your main application queue from potential memory leaks or crashes.
+
+```ts
+import { JobPayload, JobResult, PrismaJob } from "@mgcrea/prisma-queue";
+import { Worker } from "node:worker_threads";
+import { ROOT_DIR } from "src/config/env";
+import { log } from "src/config/log";
+
+const WORKER_SCRIPT = `${ROOT_DIR}/dist/worker.js`;
+
+export const processInWorker = async <P extends JobPayload, R extends JobResult>(
+  job: PrismaJob<P, R>,
+): Promise<R> =>
+  new Promise((resolve, reject) => {
+    const workerData = getJobWorkerData(job);
+
+    log.debug(`Starting worker thread for job id=${job.id} in queue=${job.record.queue}`);
+    try {
+      const worker = new Worker(WORKER_SCRIPT, {
+        workerData,
+      });
+
+      worker.on("message", resolve);
+      worker.on("error", reject);
+      worker.on("exit", (code) => {
+        if (code !== 0) {
+          reject(
+            new Error(
+              `Worker for job id=${job.id} in queue=${job.record.queue} stopped with exit code ${code}`,
+            ),
+          );
+        }
+      });
+    } catch (error) {
+      reject(error as Error);
+    }
+  });
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type JobWorkerData<P extends JobPayload = any> = {
+  id: bigint;
+  payload: P;
+  queue: string;
+};
+
+const getJobWorkerData = <P extends JobPayload, R extends JobResult>(job: PrismaJob<P, R>): JobWorkerData => {
+  // Prepare the job data for structured cloning in worker thread
+  return {
+    id: job.id,
+    payload: job.payload,
+    queue: job.record.queue,
+  };
+};
+```
+
+- `worker.ts`
+
+```ts
+import { parentPort, workerData } from "node:worker_threads";
+import { log } from "src/config/log";
+import { workers } from "src/queue";
+import { type JobWorkerData } from "src/utils/queue";
+import { logMemoryUsage } from "./utils/system";
+
+log.info(`Worker thread started with data=${JSON.stringify(workerData)}`);
+
+const typedWorkerData = workerData as JobWorkerData;
+const { queue } = typedWorkerData;
+const workerName = queue.replace(/Queue$/, "Worker") as keyof typeof workers;
+
+log.debug(`Importing worker ${workerName} for queue=${queue}`);
+const jobWorker = workers[workerName];
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+if (!jobWorker) {
+  log.error(`No worker found for queue=${queue}`);
+  process.exit(1);
+}
+
+log.info(`Running worker for queue=${queue}`);
+const result = await jobWorker(typedWorkerData);
+log.info(`Worker for queue=${queue} completed with result=${JSON.stringify(result)}`);
+parentPort?.postMessage(result);
+process.exit(0);
+```
+
 ## Authors
 
 - [Olivier Louvignes](https://github.com/mgcrea) <<olivier@mgcrea.io>>
@@ -122,7 +213,6 @@ main();
 Inspired by
 
 - [pg-queue](https://github.com/OrKoN/pg-queue) by
-  [Alex Rudenko](https://github.com/OrKoN)
 
 ## License
 
