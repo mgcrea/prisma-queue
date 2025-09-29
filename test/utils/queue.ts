@@ -4,6 +4,7 @@ import { prisma } from "./client";
 
 export type EmailJobPayload = { email: string };
 export type EmailJobResult = { code: string };
+export type EmailJob = PrismaJob<EmailJobPayload, EmailJobResult>;
 
 export const DEFAULT_POLL_INTERVAL = 500;
 let globalQueueIndex = 0;
