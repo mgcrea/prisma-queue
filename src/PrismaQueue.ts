@@ -244,41 +244,38 @@ export class PrismaQueue<
         continue;
       }
       // Query the queue size only when needed to reduce database load.
-      let estimatedQueueSize = await this.size(true);
-      if (estimatedQueueSize === 0) {
+      const queueSize = await this.size(true);
+      if (queueSize === 0) {
         await waitFor(pollInterval);
         continue;
       }
 
-      // Will loop until the queue is empty or stopped
-      while (estimatedQueueSize > 0 && !this.stopped) {
-        // Will loop until the concurrency limit is reached or stopped
-        while (estimatedQueueSize > 0 && !this.stopped && this.concurrency < maxConcurrency) {
-          // debug(`concurrency=${this.concurrency}, maxConcurrency=${maxConcurrency}`);
-          debug(`processing job from queue named="${this.name}"...`);
-          this.concurrency++;
-          setImmediate(() => {
-            this.dequeue()
-              .then((job) => {
-                if (job) {
-                  debug(`dequeued job({id: ${job.id}, payload: ${JSON.stringify(job.payload)}})`);
-                  estimatedQueueSize--;
-                } else {
-                  // No more jobs to process
-                  estimatedQueueSize = 0;
-                }
-              })
-              .catch((error: unknown) => {
-                this.emit("error", error);
-              })
-              .finally(() => {
-                this.concurrency--;
-              });
-          });
-          await waitFor(jobInterval);
-        }
-        await waitFor(jobInterval * 2);
+      // Process available jobs up to concurrency limit
+      const slotsAvailable = maxConcurrency - this.concurrency;
+      const jobsToProcess = Math.min(queueSize, slotsAvailable);
+
+      for (let i = 0; i < jobsToProcess && !this.stopped; i++) {
+        debug(`processing job from queue named="${this.name}"...`);
+        this.concurrency++;
+        setImmediate(() => {
+          this.dequeue()
+            .then((job) => {
+              if (job) {
+                debug(`dequeued job({id: ${job.id}, payload: ${JSON.stringify(job.payload)}})`);
+              }
+            })
+            .catch((error: unknown) => {
+              this.emit("error", error);
+            })
+            .finally(() => {
+              this.concurrency--;
+            });
+        });
+        await waitFor(jobInterval);
       }
+
+      // Wait before checking queue again
+      await waitFor(jobInterval * 2);
     }
   }
 
