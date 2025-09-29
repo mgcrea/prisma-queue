@@ -151,13 +151,34 @@ export class PrismaQueue<
 
   /**
    * Stops the job processing in the queue.
+   * Waits for all in-flight jobs to complete before returning.
+   * @param options - Stop options
+   * @param options.timeout - Maximum time in milliseconds to wait for in-flight jobs (default: 30000)
    */
-  public async stop(): Promise<void> {
+  public async stop(options: { timeout?: number } = {}): Promise<void> {
     const { pollInterval } = this.config;
+    const { timeout = 30000 } = options;
     debug(`stopping queue named="${this.name}"...`);
     this.stopped = true;
-    // Wait for the queue to stop
+
+    // Wait for the polling loop to notice the stop flag
     await waitFor(pollInterval);
+
+    // Wait for all in-flight jobs to complete
+    const checkInterval = 100; // Check every 100ms
+    const startTime = Date.now();
+
+    while (this.concurrency > 0) {
+      if (Date.now() - startTime > timeout) {
+        debug(
+          `stop() timed out after ${timeout}ms waiting for ${this.concurrency} in-flight jobs to complete for queue named="${this.name}"`,
+        );
+        break;
+      }
+      await waitFor(checkInterval);
+    }
+
+    debug(`queue named="${this.name}" stopped with ${this.concurrency} remaining jobs`);
   }
 
   /**
