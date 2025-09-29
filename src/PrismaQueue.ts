@@ -11,6 +11,7 @@ import {
   escape,
   getCurrentTimeZone,
   getTableName,
+  isValidTimeZone,
   serializeError,
   uncapitalize,
   waitFor,
@@ -320,6 +321,10 @@ export class PrismaQueue<
             await client.$queryRawUnsafe<[{ TimeZone: string }]>("SHOW TIME ZONE");
           const localTimeZone = getCurrentTimeZone();
           if (dbTimeZone !== localTimeZone) {
+            // Validate timezone to prevent SQL injection
+            if (!isValidTimeZone(localTimeZone)) {
+              throw new Error(`Invalid timezone: ${localTimeZone}`);
+            }
             debug(`aligning database timezone from ${dbTimeZone} to ${localTimeZone}!`);
             await client.$executeRawUnsafe(`SET LOCAL TIME ZONE '${localTimeZone}';`);
           }
