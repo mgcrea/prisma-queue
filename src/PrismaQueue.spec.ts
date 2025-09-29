@@ -596,4 +596,133 @@ describe("PrismaQueue", () => {
       void queue.stop();
     });
   });
+
+  describe("stop behavior", () => {
+    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    beforeAll(() => {
+      queue = createEmailQueue({ pollInterval: 100, jobInterval: 10 });
+    });
+    beforeEach(async () => {
+      await prisma.queueJob.deleteMany();
+    });
+    afterEach(async () => {
+      await queue.stop();
+    });
+
+    it("should wait for in-flight jobs to complete before returning", async () => {
+      let jobStarted = false;
+      let jobFinished = false;
+
+      queue.worker = vi.fn(async (_job) => {
+        jobStarted = true;
+        await waitFor(500); // Long-running job
+        jobFinished = true;
+        return { code: "200" };
+      });
+
+      await queue.enqueue({ email: "long-job@test.com" });
+      void queue.start();
+
+      // Wait for job to start
+      await waitFor(150);
+      expect(jobStarted).toBe(true);
+      expect(jobFinished).toBe(false);
+
+      // Stop should wait for the job to complete
+      const stopPromise = queue.stop();
+
+      // Job should still be running
+      expect(jobFinished).toBe(false);
+
+      // Wait for stop to complete
+      await stopPromise;
+
+      // Job should now be finished
+      expect(jobFinished).toBe(true);
+      expect(queue.worker).toHaveBeenCalledTimes(1);
+    });
+
+    it("should handle stopping with multiple concurrent jobs", async () => {
+      const concurrentQueue = createEmailQueue({ pollInterval: 100, jobInterval: 10, maxConcurrency: 3 });
+      const jobsStarted: number[] = [];
+      const jobsFinished: number[] = [];
+
+      concurrentQueue.worker = vi.fn(async (job: EmailJob) => {
+        const jobNum = job.payload.email.includes("job1") ? 1 : job.payload.email.includes("job2") ? 2 : 3;
+        jobsStarted.push(jobNum);
+        await waitFor(300);
+        jobsFinished.push(jobNum);
+        return { code: "200" };
+      });
+
+      // Enqueue 3 jobs
+      await Promise.all([
+        concurrentQueue.enqueue({ email: "job1@test.com" }),
+        concurrentQueue.enqueue({ email: "job2@test.com" }),
+        concurrentQueue.enqueue({ email: "job3@test.com" }),
+      ]);
+
+      void concurrentQueue.start();
+
+      // Wait for jobs to start
+      await waitFor(150);
+      expect(jobsStarted.length).toBeGreaterThan(0);
+
+      // Stop should wait for all jobs
+      await concurrentQueue.stop();
+
+      // All started jobs should be finished
+      expect(jobsFinished.length).toBe(jobsStarted.length);
+      expect(jobsStarted.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should respect custom timeout option", async () => {
+      const slowQueue = createEmailQueue({ pollInterval: 100, jobInterval: 10 });
+
+      slowQueue.worker = vi.fn(async (_job) => {
+        await waitFor(5000); // 5 second job
+        return { code: "200" };
+      });
+
+      await slowQueue.enqueue({ email: "slow@test.com" });
+      void slowQueue.start();
+
+      await waitFor(150); // Let job start
+
+      // Use a short timeout (1 second)
+      const startTime = Date.now();
+      await slowQueue.stop({ timeout: 1000 });
+      const stopDuration = Date.now() - startTime;
+
+      // Should timeout around 1 second (give some margin)
+      expect(stopDuration).toBeLessThan(1500);
+      expect(stopDuration).toBeGreaterThan(900);
+    }, 10000);
+
+    it("should wait longer with increased timeout", async () => {
+      const slowQueue = createEmailQueue({ pollInterval: 100, jobInterval: 10 });
+      let jobCompleted = false;
+
+      slowQueue.worker = vi.fn(async (_job) => {
+        await waitFor(1500); // 1.5 second job
+        jobCompleted = true;
+        return { code: "200" };
+      });
+
+      await slowQueue.enqueue({ email: "medium@test.com" });
+      void slowQueue.start();
+
+      await waitFor(150); // Let job start
+
+      // Use a longer timeout that should allow job to complete
+      await slowQueue.stop({ timeout: 5000 });
+
+      // Job should have completed
+      expect(jobCompleted).toBe(true);
+    }, 10000);
+
+    afterAll(async () => {
+      await queue.stop();
+    });
+  });
 });
