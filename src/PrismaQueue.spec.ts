@@ -190,7 +190,7 @@ describe("PrismaQueue", () => {
       // Stop the queue that was started in beforeEach
       await queue.stop();
 
-      queue.worker = vi.fn(async (_job) => {
+      queue.worker = vi.fn(async (_job: EmailJob) => {
         await waitFor(JOB_WAIT);
         return { code: "200" };
       });
@@ -210,7 +210,8 @@ describe("PrismaQueue", () => {
       await queue.stop();
 
       // May or may not have started processing
-      const countAfterInterruption = queue.worker.mock.calls.length;
+      const mockedWorker = queue.worker as ReturnType<typeof vi.fn>;
+      const countAfterInterruption = mockedWorker.mock.calls.length;
 
       // Now properly start and let all jobs complete
       void queue.start();
@@ -222,7 +223,7 @@ describe("PrismaQueue", () => {
       }
 
       // Eventually both jobs should be processed
-      expect(queue.worker.mock.calls.length).toBe(2);
+      expect(mockedWorker.mock.calls.length).toBe(2);
     }, 10000); // Increase timeout for this test
     afterAll(() => {
       void queue.stop();
