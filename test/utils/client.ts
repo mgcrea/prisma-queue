@@ -1,9 +1,12 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 import createDebug from "debug";
+import { env } from "prisma/config";
+import { PrismaClient } from "../../prisma";
 
 const debug = createDebug("prisma-query");
 
 export const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: env("DATABASE_URL") }),
   log: [
     {
       emit: "event",

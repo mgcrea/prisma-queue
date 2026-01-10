@@ -10,7 +10,7 @@ export const DEFAULT_POLL_INTERVAL = 500;
 let globalQueueIndex = 0;
 
 export const createEmailQueue = (
-  options: PrismaQueueOptions = {},
+  options: Omit<PrismaQueueOptions, "prisma"> = {},
   // eslint-disable-next-line @typescript-eslint/require-await
   worker: JobWorker<EmailJobPayload, EmailJobResult> = async (_job) => {
     return { code: "200" };

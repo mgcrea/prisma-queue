@@ -9,5 +9,5 @@
       "test/*": ["./test/*"]
     }
   },
-  "include": ["src", "test", "*.config.ts"]
+  "include": ["src", "test", "prisma", "*.config.ts"],
 }

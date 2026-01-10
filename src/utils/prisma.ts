@@ -1,4 +1,7 @@
-import { Prisma } from "@prisma/client";
+import { defineDmmfProperty } from "@prisma/client/runtime/client.js";
+import { PrismaClient } from "../../prisma";
+
+type RuntimeDataModel = Parameters<typeof defineDmmfProperty>[1];
 
 /**
  * Converts a PascalCase model name to snake_case table name.
@@ -12,9 +15,11 @@ const toSnakeCase = (str: string): string => {
  * Gets the database table name for a Prisma model.
  * Falls back to snake_case conversion if DMMF is not available (e.g., edge environments).
  */
-export const getTableName = (modelName: string): string => {
+export const getTableName = (prisma: PrismaClient, modelName: string): string => {
   try {
-    const model = Prisma.dmmf?.datamodel?.models?.find((model) => model.name === modelName);
+    // @ts-expect-error from messing with prisma internals
+    const datamodel = prisma._runtimeDataModel as RuntimeDataModel;
+    const model = datamodel.models["QueueJob"];
     if (model?.dbName) {
       return model.dbName;
     }

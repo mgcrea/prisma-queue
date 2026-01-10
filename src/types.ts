@@ -1,4 +1,5 @@
-import type { Prisma, PrismaClient, QueueJob as PrismaQueueJob } from "@prisma/client";
+import { Prisma, PrismaClient } from "../prisma";
+import { QueueJobModel as PrismaQueueJob } from "../prisma/client/models";
 import type { PrismaJob } from "./PrismaJob";
 
 export type Simplify<T> = { [KeyType in keyof T]: T[KeyType] } & {};

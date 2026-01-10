@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "../../prisma";
 
 type InputJsonValue = Prisma.InputJsonValue;
 type InputJsonObject = Prisma.InputJsonObject;

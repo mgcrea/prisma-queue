@@ -1,6 +1,6 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "../prisma";
+// import { PrismaClientKnownRequestError } from "../prisma/client/";
 import type { DatabaseJob, PrismaLightClient } from "./types";
-import { isPrismaError } from "./utils";
 // import { debug } from "./utils";
 
 export type PrismaJobOptions = {
@@ -156,9 +156,10 @@ export class PrismaJob<Payload, Result> {
       return false;
     } catch (error) {
       // Handle specific error types that indicate lock contention
-      if (isPrismaError(error) && error.meta?.["code"] === "55P03") {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
         // PostgreSQL's lock_not_available
-        return true;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+        return (error.meta as any)?.driverAdapterError?.cause?.code === "55P03";
       }
       // Re-throw other unexpected errors
       throw error;

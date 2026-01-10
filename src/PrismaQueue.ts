@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
-import { Prisma, PrismaClient } from "@prisma/client";
 import { Cron } from "croner";
 import { EventEmitter } from "events";
 import assert from "node:assert";
+import { Prisma, PrismaClient } from "../prisma";
 import { PrismaJob } from "./PrismaJob";
 import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker } from "./types";
 import {
@@ -17,7 +17,7 @@ import {
 } from "./utils";
 
 export type PrismaQueueOptions = {
-  prisma?: PrismaClient;
+  prisma: PrismaClient;
   name?: string;
   maxAttempts?: number | null;
   maxConcurrency?: number;
@@ -87,16 +87,16 @@ export class PrismaQueue<
    * @param worker - The worker function that processes jobs.
    */
   public constructor(
-    private options: PrismaQueueOptions = {},
+    private options: PrismaQueueOptions,
     public worker: JobWorker<T, U>,
   ) {
     super();
 
     const {
-      prisma = new PrismaClient(),
+      prisma,
       name = "default",
       modelName = "QueueJob",
-      tableName = getTableName(modelName),
+      tableName = getTableName(prisma, modelName),
       maxAttempts = null,
       maxConcurrency = DEFAULT_MAX_CONCURRENCY,
       pollInterval = DEFAULT_POLL_INTERVAL,
