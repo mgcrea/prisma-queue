@@ -115,6 +115,24 @@ main();
 
 ## Advanced usage
 
+### Edge Environments
+
+When using this library in edge environments (Cloudflare Workers, Vercel Edge Functions, etc.) where Prisma's DMMF (Datamodel Meta Format) may not be available, you should explicitly provide the `tableName` option:
+
+```ts
+export const emailQueue = createQueue<JobPayload, JobResult>(
+  {
+    name: "email",
+    tableName: "queue_job", // Explicit table name for edge environments
+  },
+  async (job, client) => {
+    // ...
+  },
+);
+```
+
+The library will automatically fall back to a snake_case conversion of the model name (e.g., `QueueJob` → `queue_job`) if DMMF is unavailable, but providing `tableName` explicitly is recommended for edge deployments.
+
 ### Threading
 
 You can easily spin of your workers in separate threads using [worker_threads](https://nodejs.org/api/worker_threads.html#worker-threads) (Node.js >= 12.17.0).
