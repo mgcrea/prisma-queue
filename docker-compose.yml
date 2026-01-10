@@ -1,8 +1,7 @@
 services:
-  # https://hub.docker.com/r/bitnami/postgresql
-  # https://github.com/bitnami/bitnami-docker-postgresql
+  # https://hub.docker.com/r/bitnamilegacy/postgresql
   postgresql:
-    image: docker.io/bitnami/postgresql:16.3.0-debian-12-r17
+    image: docker.io/bitnamilegacy/postgresql:16.6.0-debian-12-r2
     ports:
       - "6432:5432"
     environment:

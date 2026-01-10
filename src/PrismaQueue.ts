@@ -102,6 +102,7 @@ export class PrismaQueue<
       pollInterval = DEFAULT_POLL_INTERVAL,
       jobInterval = DEFAULT_JOB_INTERVAL,
       deleteOn = DEFAULT_DELETE_ON,
+      // eslint-disable-next-line @typescript-eslint/no-deprecated
       alignTimeZone = false,
     } = this.options;
 

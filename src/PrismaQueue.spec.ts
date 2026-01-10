@@ -29,6 +29,7 @@ describe("PrismaQueue", () => {
         "config",
         "concurrency",
         "stopped",
+        "abortController",
         "add",
         "options",
         "worker",
