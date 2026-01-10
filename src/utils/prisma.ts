@@ -1,5 +1,5 @@
 import { defineDmmfProperty } from "@prisma/client/runtime/client.js";
-import { PrismaClient } from "../../prisma";
+import { ITXClient } from "../types";
 
 type RuntimeDataModel = Parameters<typeof defineDmmfProperty>[1];
 
@@ -15,7 +15,7 @@ const toSnakeCase = (str: string): string => {
  * Gets the database table name for a Prisma model.
  * Falls back to snake_case conversion if DMMF is not available (e.g., edge environments).
  */
-export const getTableName = (prisma: PrismaClient, modelName: string): string => {
+export const getTableName = (prisma: ITXClient, modelName: string): string => {
   try {
     // @ts-expect-error from messing with prisma internals
     const datamodel = prisma._runtimeDataModel as RuntimeDataModel;

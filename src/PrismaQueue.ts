@@ -2,9 +2,9 @@
 import { Cron } from "croner";
 import { EventEmitter } from "events";
 import assert from "node:assert";
-import { Prisma, PrismaClient } from "../prisma";
+import { Prisma } from "../prisma";
 import { PrismaJob } from "./PrismaJob";
-import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker } from "./types";
+import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker, PrismaQueueClient } from "./types";
 import {
   AbortError,
   calculateDelay,
@@ -17,7 +17,7 @@ import {
 } from "./utils";
 
 export type PrismaQueueOptions = {
-  prisma: PrismaClient;
+  prisma: PrismaQueueClient;
   name?: string;
   maxAttempts?: number | null;
   maxConcurrency?: number;
@@ -73,7 +73,7 @@ export class PrismaQueue<
   T extends JobPayload = JobPayload,
   U extends JobResult = JobResult,
 > extends EventEmitter {
-  #prisma: PrismaClient;
+  #prisma: PrismaQueueClient;
   private name: string;
   private config: Required<Omit<PrismaQueueOptions, "name" | "prisma">>;
 

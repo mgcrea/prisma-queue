@@ -1,11 +1,10 @@
 import { Prisma } from "../prisma";
-// import { PrismaClientKnownRequestError } from "../prisma/client/";
-import type { DatabaseJob, PrismaLightClient } from "./types";
+import type { DatabaseJob, ITXClient } from "./types";
 // import { debug } from "./utils";
 
 export type PrismaJobOptions = {
   model: Prisma.QueueJobDelegate;
-  client: PrismaLightClient;
+  client: ITXClient;
 };
 
 /**
@@ -13,7 +12,7 @@ export type PrismaJobOptions = {
  */
 export class PrismaJob<Payload, Result> {
   #model: Prisma.QueueJobDelegate;
-  #client: PrismaLightClient;
+  #client: ITXClient;
   #record: DatabaseJob<Payload, Result>;
 
   public readonly id;
