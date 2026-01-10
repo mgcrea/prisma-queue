@@ -6,12 +6,11 @@ import assert from "node:assert";
 import { PrismaJob } from "./PrismaJob";
 import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker } from "./types";
 import {
+  AbortError,
   calculateDelay,
   debug,
   escape,
-  getCurrentTimeZone,
   getTableName,
-  isValidTimeZone,
   serializeError,
   uncapitalize,
   waitFor,
@@ -27,6 +26,10 @@ export type PrismaQueueOptions = {
   modelName?: string;
   tableName?: string;
   deleteOn?: "success" | "failure" | "always" | "never";
+  /**
+   * @deprecated This option is deprecated and will be removed in a future version.
+   * The queue now uses JavaScript Date objects instead of SQL NOW() to avoid timezone issues.
+   */
   alignTimeZone?: boolean;
 };
 
@@ -76,6 +79,7 @@ export class PrismaQueue<
 
   private concurrency = 0;
   private stopped = true;
+  private abortController = new AbortController();
 
   /**
    * Constructs a PrismaQueue object with specified options and a worker function.
@@ -127,6 +131,14 @@ export class PrismaQueue<
         error,
       );
     });
+
+    // Warn about deprecated alignTimeZone option
+    if (alignTimeZone) {
+      console.warn(
+        "[prisma-queue] The alignTimeZone option is deprecated and will be removed in a future version. " +
+          "The queue now uses JavaScript Date objects instead of SQL NOW() to avoid timezone issues.",
+      );
+    }
   }
 
   /**
@@ -147,6 +159,8 @@ export class PrismaQueue<
       return;
     }
     this.stopped = false;
+    // Reset abort controller for new start
+    this.abortController = new AbortController();
     return this.poll();
   }
 
@@ -157,13 +171,10 @@ export class PrismaQueue<
    * @param options.timeout - Maximum time in milliseconds to wait for in-flight jobs (default: 30000)
    */
   public async stop(options: { timeout?: number } = {}): Promise<void> {
-    const { pollInterval } = this.config;
     const { timeout = 30000 } = options;
     debug(`stopping queue named="${this.name}"...`);
     this.stopped = true;
-
-    // Wait for the polling loop to notice the stop flag
-    await waitFor(pollInterval);
+    this.abortController.abort();
 
     // Wait for all in-flight jobs to complete
     const checkInterval = 100; // Check every 100ms
@@ -202,17 +213,29 @@ export class PrismaQueue<
     debug(`enqueue`, this.name, payloadOrFunction, options);
     const { name: queueName, config } = this;
     const { key = null, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
+    const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
+    const now = new Date();
     const record = await this.#prisma.$transaction(async (client) => {
+      const model = client[queueJobKey];
       const payload =
         payloadOrFunction instanceof Function ? await payloadOrFunction(client) : payloadOrFunction;
-      const data = { queue: queueName, cron, payload, maxAttempts, priority, key };
+      const data = {
+        queue: queueName,
+        cron,
+        payload,
+        maxAttempts,
+        priority,
+        key,
+        createdAt: now,
+        runAt: runAt ?? now,
+      };
       if (key && runAt) {
-        const { count } = await this.model.deleteMany({
+        const { count } = await model.deleteMany({
           where: {
             queue: queueName,
             key,
             runAt: {
-              gte: new Date(),
+              gte: now,
               not: runAt,
             },
           },
@@ -220,16 +243,18 @@ export class PrismaQueue<
         if (count > 0) {
           debug(`deleted ${count} conflicting upcoming queue jobs`);
         }
-        const update = { ...data, ...(runAt ? { runAt } : {}) };
-        return await this.model.upsert({
+        return await model.upsert({
           where: { key_runAt: { key, runAt } },
-          create: { ...update },
-          update,
+          create: data,
+          update: data,
         });
       }
-      return await this.model.create({ data });
+      return await model.create({ data });
     });
-    const job = new PrismaJob(record as DatabaseJob<T, U>, { model: this.model, client: this.#prisma });
+    const job = new PrismaJob(record as DatabaseJob<T, U>, {
+      model: this.model,
+      client: this.#prisma,
+    });
     this.emit("enqueue", job);
     return job;
   }
@@ -259,45 +284,53 @@ export class PrismaQueue<
       `polling queue named="${this.name}" with pollInterval=${pollInterval} maxConcurrency=${maxConcurrency}...`,
     );
 
-    while (!this.stopped) {
-      // Wait for the queue to be ready
-      if (this.concurrency >= maxConcurrency) {
-        await waitFor(pollInterval);
-        continue;
-      }
-      // Query the queue size only when needed to reduce database load.
-      const queueSize = await this.size(true);
-      if (queueSize === 0) {
-        await waitFor(pollInterval);
-        continue;
-      }
+    try {
+      while (!this.stopped) {
+        // Wait for the queue to be ready
+        if (this.concurrency >= maxConcurrency) {
+          await waitFor(pollInterval, this.abortController.signal);
+          continue;
+        }
+        // Query the queue size only when needed to reduce database load.
+        const queueSize = await this.size(true);
+        if (queueSize === 0) {
+          await waitFor(pollInterval, this.abortController.signal);
+          continue;
+        }
 
-      // Process available jobs up to concurrency limit
-      const slotsAvailable = maxConcurrency - this.concurrency;
-      const jobsToProcess = Math.min(queueSize, slotsAvailable);
+        // Process available jobs up to concurrency limit
+        const slotsAvailable = maxConcurrency - this.concurrency;
+        const jobsToProcess = Math.min(queueSize, slotsAvailable);
 
-      for (let i = 0; i < jobsToProcess && !this.stopped; i++) {
-        debug(`processing job from queue named="${this.name}"...`);
-        this.concurrency++;
-        setImmediate(() => {
-          this.dequeue()
-            .then((job) => {
-              if (job) {
-                debug(`dequeued job({id: ${job.id}, payload: ${JSON.stringify(job.payload)}})`);
-              }
-            })
-            .catch((error: unknown) => {
-              this.emit("error", error);
-            })
-            .finally(() => {
-              this.concurrency--;
-            });
-        });
-        await waitFor(jobInterval);
+        for (let i = 0; i < jobsToProcess && !this.stopped; i++) {
+          debug(`processing job from queue named="${this.name}"...`);
+          this.concurrency++;
+          setImmediate(() => {
+            this.dequeue()
+              .then((job) => {
+                if (job) {
+                  debug(`dequeued job({id: ${job.id}, payload: ${JSON.stringify(job.payload)}})`);
+                }
+              })
+              .catch((error: unknown) => {
+                this.emit("error", error);
+              })
+              .finally(() => {
+                this.concurrency--;
+              });
+          });
+          await waitFor(jobInterval, this.abortController.signal);
+        }
+
+        // Wait before checking queue again
+        await waitFor(jobInterval * 2, this.abortController.signal);
       }
-
-      // Wait before checking queue again
-      await waitFor(jobInterval * 2);
+    } catch (error) {
+      if (error instanceof AbortError) {
+        debug(`polling for queue named="${this.name}" was aborted`);
+      } else {
+        throw error;
+      }
     }
   }
 
@@ -311,39 +344,28 @@ export class PrismaQueue<
     }
     debug(`dequeuing from queue named="${this.name}"...`);
     const { name: queueName } = this;
-    const { tableName: tableNameRaw, deleteOn, alignTimeZone } = this.config;
+    const { tableName: tableNameRaw, deleteOn } = this.config;
     const tableName = escape(tableNameRaw);
     const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
+    const now = new Date();
     const job = await this.#prisma.$transaction(
       async (client) => {
-        if (alignTimeZone) {
-          const [{ TimeZone: dbTimeZone }] =
-            await client.$queryRawUnsafe<[{ TimeZone: string }]>("SHOW TIME ZONE");
-          const localTimeZone = getCurrentTimeZone();
-          if (dbTimeZone !== localTimeZone) {
-            // Validate timezone to prevent SQL injection
-            if (!isValidTimeZone(localTimeZone)) {
-              throw new Error(`Invalid timezone: ${localTimeZone}`);
-            }
-            debug(`aligning database timezone from ${dbTimeZone} to ${localTimeZone}!`);
-            await client.$executeRawUnsafe(`SET LOCAL TIME ZONE '${localTimeZone}';`);
-          }
-        }
         const rows = await client.$queryRawUnsafe<DatabaseJob<T, U>[]>(
-          `UPDATE ${tableName} SET "processedAt" = NOW(), "attempts" = "attempts" + 1
+          `UPDATE ${tableName} SET "processedAt" = $2, "attempts" = "attempts" + 1
            WHERE id = (
              SELECT id
              FROM ${tableName}
              WHERE (${tableName}."queue" = $1)
                AND (${tableName}."finishedAt" IS NULL)
-               AND (${tableName}."runAt" < NOW())
-               AND (${tableName}."notBefore" IS NULL OR ${tableName}."notBefore" < NOW())
+               AND (${tableName}."runAt" <= $2)
+               AND (${tableName}."notBefore" IS NULL OR ${tableName}."notBefore" <= $2)
              ORDER BY ${tableName}."priority" ASC, ${tableName}."runAt" ASC
              FOR UPDATE SKIP LOCKED
              LIMIT 1
            )
            RETURNING *;`,
           queueName,
+          now,
         );
         if (!rows.length || !rows[0]) {
           debug(`no jobs found in queue named="${this.name}"`);
@@ -351,7 +373,10 @@ export class PrismaQueue<
           return null;
         }
         const { id, payload, attempts, maxAttempts } = rows[0];
-        const job = new PrismaJob<T, U>(rows[0], { model: client[queueJobKey], client });
+        const job = new PrismaJob<T, U>(rows[0], {
+          model: client[queueJobKey],
+          client,
+        });
         let result;
         try {
           debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);

@@ -1,6 +1,22 @@
-export const waitFor = async (ms: number) =>
-  new Promise((resolve) => {
-    setTimeout(resolve, ms);
+export class AbortError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AbortError";
+  }
+}
+
+export const waitFor = async (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      resolve();
+    }, ms);
+
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        clearTimeout(timeout);
+        reject(new AbortError("Aborted"));
+      });
+    }
   });
 
 export const calculateDelay = (attempts: number): number =>
