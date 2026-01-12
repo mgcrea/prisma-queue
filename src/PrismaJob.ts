@@ -3,7 +3,7 @@ import type { DatabaseJob, ITXClient } from "./types";
 // import { debug } from "./utils";
 
 export type PrismaJobOptions = {
-  model: Prisma.QueueJobDelegate;
+  tableName: string;
   client: ITXClient;
 };
 
@@ -11,7 +11,7 @@ export type PrismaJobOptions = {
  * Represents a job within a Prisma-managed queue.
  */
 export class PrismaJob<Payload, Result> {
-  #model: Prisma.QueueJobDelegate;
+  #tableName: string;
   #client: ITXClient;
   #record: DatabaseJob<Payload, Result>;
 
@@ -24,8 +24,8 @@ export class PrismaJob<Payload, Result> {
    * @param model - The Prisma delegate used for database operations related to the job.
    * @param client - The Prisma client for executing arbitrary queries.
    */
-  constructor(record: DatabaseJob<Payload, Result>, { model, client }: PrismaJobOptions) {
-    this.#model = model;
+  constructor(record: DatabaseJob<Payload, Result>, { tableName, client }: PrismaJobOptions) {
+    this.#tableName = tableName;
     this.#client = client;
     this.#record = record;
     this.id = record.id;
@@ -109,7 +109,7 @@ export class PrismaJob<Payload, Result> {
    * Fetches the latest job record from the database and updates the internal state.
    */
   public async fetch(): Promise<DatabaseJob<Payload, Result>> {
-    const record = (await this.#model.findUnique({
+    const record = (await this.#client.queueJob.findUnique({
       where: { id: this.id },
     })) as DatabaseJob<Payload, Result>;
     this.#assign(record);
@@ -121,7 +121,7 @@ export class PrismaJob<Payload, Result> {
    * @param data - The new data to be merged with the existing job record.
    */
   public async update(data: Prisma.QueueJobUpdateInput): Promise<DatabaseJob<Payload, Result>> {
-    const record = (await this.#model.update({
+    const record = (await this.#client.queueJob.update({
       where: { id: this.id },
       data,
     })) as DatabaseJob<Payload, Result>;
@@ -133,7 +133,7 @@ export class PrismaJob<Payload, Result> {
    * Deletes the job from the database.
    */
   public async delete(): Promise<DatabaseJob<Payload, Result>> {
-    const record = (await this.#model.delete({
+    const record = (await this.#client.queueJob.delete({
       where: { id: this.id },
     })) as DatabaseJob<Payload, Result>;
     return record;
@@ -147,7 +147,7 @@ export class PrismaJob<Payload, Result> {
     try {
       // Attempt to select and lock the row with a timeout
       await this.#client.$executeRawUnsafe(
-        `SELECT "id" FROM "public"."queue_jobs" WHERE "id" = $1 FOR UPDATE NOWAIT`,
+        `SELECT "id" FROM "public"."${this.#tableName}" WHERE "id" = $1 FOR UPDATE NOWAIT`,
         this.id,
       );
 
