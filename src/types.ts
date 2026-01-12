@@ -20,4 +20,5 @@ export type JobWorker<T extends JobPayload = JobPayload, U extends JobResult = J
   client: ITXClient,
 ) => Promise<U>;
 
-export type ClientOptions = Pick<Prisma.PrismaClientOptions, "log"> & { adapter: PrismaPg };
+export type Adapter = PrismaPg;
+export type Log = Prisma.PrismaClientOptions["log"];

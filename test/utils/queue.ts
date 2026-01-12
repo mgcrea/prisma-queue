@@ -1,6 +1,7 @@
+import { PrismaPg } from "@prisma/adapter-pg";
+import { env } from "prisma/config";
 import { PrismaJob, PrismaQueue, PrismaQueueEvents, createQueue, type PrismaQueueOptions } from "src/index";
 import type { JobPayload, JobResult, JobWorker } from "src/types";
-import { client } from "./client";
 
 export type EmailJobPayload = { email: string };
 export type EmailJobResult = { code: string };
@@ -9,8 +10,10 @@ export type EmailJob = PrismaJob<EmailJobPayload, EmailJobResult>;
 export const DEFAULT_POLL_INTERVAL = 500;
 let globalQueueIndex = 0;
 
+const adapter = new PrismaPg({ connectionString: env("DATABASE_URL") });
+
 export const createEmailQueue = (
-  options: Omit<PrismaQueueOptions, "client"> = {},
+  options: Omit<PrismaQueueOptions, "adapter" | "log"> = {},
   // eslint-disable-next-line @typescript-eslint/require-await
   worker: JobWorker<EmailJobPayload, EmailJobResult> = async (_job) => {
     return { code: "200" };
@@ -24,7 +27,25 @@ export const createEmailQueue = (
   globalQueueIndex++;
   return createQueue<EmailJobPayload, EmailJobResult>(
     {
-      client,
+      adapter,
+      log: [
+        {
+          emit: "event",
+          level: "query",
+        },
+        {
+          emit: "stdout",
+          level: "error",
+        },
+        {
+          emit: "stdout",
+          level: "info",
+        },
+        {
+          emit: "stdout",
+          level: "warn",
+        },
+      ],
       name,
       pollInterval,
       ...otherOptions,
