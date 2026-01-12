@@ -4,15 +4,7 @@ import { EventEmitter } from "events";
 import assert from "node:assert";
 import { Prisma, PrismaClient } from "../prisma";
 import { PrismaJob } from "./PrismaJob";
-import type {
-  ClientOptions,
-  DatabaseJob,
-  JobCreator,
-  JobPayload,
-  JobResult,
-  JobWorker,
-  PrismaQueueClient,
-} from "./types";
+import type { ClientOptions, DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker } from "./types";
 import {
   AbortError,
   calculateDelay,
@@ -25,7 +17,6 @@ import {
 } from "./utils";
 
 export type PrismaQueueOptions = {
-  // prisma: PrismaQueueClient;
   client: ClientOptions;
   name?: string;
   maxAttempts?: number | null;
@@ -82,7 +73,7 @@ export class PrismaQueue<
   T extends JobPayload = JobPayload,
   U extends JobResult = JobResult,
 > extends EventEmitter {
-  public prisma: PrismaQueueClient;
+  public prisma: PrismaClient;
   private name: string;
   private config: Required<Omit<PrismaQueueOptions, "name" | "client">>;
 

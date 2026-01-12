@@ -6,11 +6,6 @@ import type { PrismaJob } from "./PrismaJob";
 
 export type ITXClient = Omit<PrismaClient, ITXClientDenyList>;
 
-export type PrismaQueueClient = Pick<
-  PrismaClient,
-  "queueJob" | "$transaction" | "$executeRaw" | "$executeRawUnsafe" | "$queryRaw" | "$queryRawUnsafe"
->;
-
 export type Simplify<T> = { [KeyType in keyof T]: T[KeyType] } & {};
 
 export type JobPayload = Prisma.InputJsonValue;
