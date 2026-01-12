@@ -1,3 +1,4 @@
+import { PrismaPg } from "@prisma/adapter-pg";
 import type { ITXClientDenyList } from "@prisma/client/runtime/client";
 import { Prisma, PrismaClient } from "../prisma";
 import { QueueJobModel as PrismaQueueJob } from "../prisma/client/models";
@@ -23,3 +24,5 @@ export type JobWorker<T extends JobPayload = JobPayload, U extends JobResult = J
   job: PrismaJob<T, U>,
   client: ITXClient,
 ) => Promise<U>;
+
+export type ClientOptions = Pick<Prisma.PrismaClientOptions, "log"> & { adapter: PrismaPg };

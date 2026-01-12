@@ -1,6 +1,6 @@
 import { PrismaJob, PrismaQueue, PrismaQueueEvents, createQueue, type PrismaQueueOptions } from "src/index";
 import type { JobPayload, JobResult, JobWorker } from "src/types";
-import { prisma } from "./client";
+import { client } from "./client";
 
 export type EmailJobPayload = { email: string };
 export type EmailJobResult = { code: string };
@@ -10,7 +10,7 @@ export const DEFAULT_POLL_INTERVAL = 500;
 let globalQueueIndex = 0;
 
 export const createEmailQueue = (
-  options: Omit<PrismaQueueOptions, "prisma"> = {},
+  options: Omit<PrismaQueueOptions, "client"> = {},
   // eslint-disable-next-line @typescript-eslint/require-await
   worker: JobWorker<EmailJobPayload, EmailJobResult> = async (_job) => {
     return { code: "200" };
@@ -24,7 +24,7 @@ export const createEmailQueue = (
   globalQueueIndex++;
   return createQueue<EmailJobPayload, EmailJobResult>(
     {
-      prisma,
+      client,
       name,
       pollInterval,
       ...otherOptions,

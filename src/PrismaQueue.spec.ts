@@ -4,7 +4,6 @@ import { debug, serializeError, waitFor } from "src/utils";
 import {
   createEmailQueue,
   DEFAULT_POLL_INTERVAL,
-  prisma,
   waitForNextEvent,
   waitForNextJob,
   waitForNthJob,
@@ -25,6 +24,7 @@ describe("PrismaQueue", () => {
         "_events",
         "_eventsCount",
         "_maxListeners",
+        "prisma",
         "name",
         "config",
         "concurrency",
@@ -42,7 +42,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await queue.prisma.queueJob.deleteMany();
       void queue.start();
     });
     afterEach(() => {
@@ -85,7 +85,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await queue.prisma.queueJob.deleteMany();
       void queue.start();
     });
     afterEach(() => {
@@ -109,7 +109,7 @@ describe("PrismaQueue", () => {
       );
       void queue.start();
       await waitForNextEvent(queue, "enqueue");
-      const jobs = await prisma.queueJob.findMany({ where: { key: "email-schedule" } });
+      const jobs = await queue.prisma.queueJob.findMany({ where: { key: "email-schedule" } });
       expect(jobs.length).toBe(2);
       const record = jobs[1];
       expect(record).toBeDefined();
@@ -119,14 +119,14 @@ describe("PrismaQueue", () => {
     it("should properly upsert a recurring job", async () => {
       await queue.schedule({ key: "email-schedule", cron: "5 5 * * *" }, { email: "foo@bar.com" });
       await queue.schedule({ key: "email-schedule", cron: "5 5 * * *" }, { email: "baz@bar.com" });
-      const jobs = await prisma.queueJob.findMany({ where: { key: "email-schedule" } });
+      const jobs = await queue.prisma.queueJob.findMany({ where: { key: "email-schedule" } });
       expect(jobs.length).toBe(1);
       expect(jobs[0]?.payload).toEqual({ email: "baz@bar.com" });
     });
     it("should properly upsert a recurring job with another schedule", async () => {
       await queue.schedule({ key: "email-schedule", cron: "5 5 * * *" }, { email: "foo@bar.com" });
       await queue.schedule({ key: "email-schedule", cron: "0 5 * * *" }, { email: "foo@bar.com" });
-      const jobs = await prisma.queueJob.findMany({ where: { key: "email-schedule" } });
+      const jobs = await queue.prisma.queueJob.findMany({ where: { key: "email-schedule" } });
       expect(jobs.length).toBe(1);
       expect(jobs[0]?.runAt.getMinutes()).toBe(0);
     });
@@ -138,7 +138,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await queue.prisma.queueJob.deleteMany();
       void queue.start();
     });
     afterEach(() => {
@@ -238,7 +238,7 @@ describe("PrismaQueue", () => {
         queue = createEmailQueue({ deleteOn: "success" });
       });
       beforeEach(async () => {
-        await prisma.queueJob.deleteMany();
+        await queue.prisma.queueJob.deleteMany();
         void queue.start();
       });
       afterEach(() => {
@@ -264,7 +264,7 @@ describe("PrismaQueue", () => {
         queue = createEmailQueue({ deleteOn: "failure" });
       });
       beforeEach(async () => {
-        await prisma.queueJob.deleteMany();
+        await queue.prisma.queueJob.deleteMany();
         void queue.start();
       });
       afterEach(() => {
@@ -292,7 +292,7 @@ describe("PrismaQueue", () => {
         queue = createEmailQueue({ deleteOn: "always" });
       });
       beforeEach(async () => {
-        await prisma.queueJob.deleteMany();
+        await queue.prisma.queueJob.deleteMany();
         void queue.start();
       });
       afterEach(() => {
@@ -334,7 +334,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue({ maxConcurrency: 2 });
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await queue.prisma.queueJob.deleteMany();
       void queue.start();
     });
     afterEach(() => {
@@ -365,7 +365,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await queue.prisma.queueJob.deleteMany();
       // void queue.start();
     });
     afterEach(() => {
@@ -407,7 +407,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await queue.prisma.queueJob.deleteMany();
       void queue.start();
     });
     afterEach(() => {
@@ -436,7 +436,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue({ pollInterval: 200 });
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await queue.prisma.queueJob.deleteMany();
       void queue.start();
     });
     afterEach(() => {
@@ -464,7 +464,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue({ pollInterval: 100, jobInterval: 10 });
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await queue.prisma.queueJob.deleteMany();
     });
     afterEach(() => {
       void queue.stop();
@@ -605,7 +605,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue({ pollInterval: 100, jobInterval: 10 });
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await queue.prisma.queueJob.deleteMany();
     });
     afterEach(async () => {
       await queue.stop();

@@ -2,9 +2,17 @@
 import { Cron } from "croner";
 import { EventEmitter } from "events";
 import assert from "node:assert";
-import { Prisma } from "../prisma";
+import { Prisma, PrismaClient } from "../prisma";
 import { PrismaJob } from "./PrismaJob";
-import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker, PrismaQueueClient } from "./types";
+import type {
+  ClientOptions,
+  DatabaseJob,
+  JobCreator,
+  JobPayload,
+  JobResult,
+  JobWorker,
+  PrismaQueueClient,
+} from "./types";
 import {
   AbortError,
   calculateDelay,
@@ -17,7 +25,8 @@ import {
 } from "./utils";
 
 export type PrismaQueueOptions = {
-  prisma: PrismaQueueClient;
+  // prisma: PrismaQueueClient;
+  client: ClientOptions;
   name?: string;
   maxAttempts?: number | null;
   maxConcurrency?: number;
@@ -73,9 +82,9 @@ export class PrismaQueue<
   T extends JobPayload = JobPayload,
   U extends JobResult = JobResult,
 > extends EventEmitter {
-  #prisma: PrismaQueueClient;
+  public prisma: PrismaQueueClient;
   private name: string;
-  private config: Required<Omit<PrismaQueueOptions, "name" | "prisma">>;
+  private config: Required<Omit<PrismaQueueOptions, "name" | "client">>;
 
   private concurrency = 0;
   private stopped = true;
@@ -92,11 +101,12 @@ export class PrismaQueue<
   ) {
     super();
 
+    this.prisma = new PrismaClient(this.options.client);
+
     const {
-      prisma,
       name = "default",
       modelName = "QueueJob",
-      tableName = getTableName(prisma, modelName),
+      tableName = getTableName(this.prisma, modelName),
       maxAttempts = null,
       maxConcurrency = DEFAULT_MAX_CONCURRENCY,
       pollInterval = DEFAULT_POLL_INTERVAL,
@@ -111,7 +121,6 @@ export class PrismaQueue<
     assert(jobInterval >= 10, "jobInterval must be more than 10 ms");
 
     this.name = name;
-    this.#prisma = prisma;
     this.config = {
       modelName,
       tableName,
@@ -147,7 +156,7 @@ export class PrismaQueue<
    */
   private get model(): Prisma.QueueJobDelegate {
     const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
-    return this.#prisma[queueJobKey];
+    return this.prisma[queueJobKey];
   }
 
   /**
@@ -216,7 +225,7 @@ export class PrismaQueue<
     const { key = null, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
     const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
     const now = new Date();
-    const record = await this.#prisma.$transaction(async (client) => {
+    const record = await this.prisma.$transaction(async (client) => {
       const model = client[queueJobKey];
       const payload =
         payloadOrFunction instanceof Function ? await payloadOrFunction(client) : payloadOrFunction;
@@ -254,7 +263,7 @@ export class PrismaQueue<
     });
     const job = new PrismaJob(record as DatabaseJob<T, U>, {
       model: this.model,
-      client: this.#prisma,
+      client: this.prisma,
     });
     this.emit("enqueue", job);
     return job;
@@ -349,7 +358,7 @@ export class PrismaQueue<
     const tableName = escape(tableNameRaw);
     const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
     const now = new Date();
-    const job = await this.#prisma.$transaction(
+    const job = await this.prisma.$transaction(
       async (client) => {
         const rows = await client.$queryRawUnsafe<DatabaseJob<T, U>[]>(
           `UPDATE ${tableName} SET "processedAt" = $2, "attempts" = "attempts" + 1
@@ -381,7 +390,7 @@ export class PrismaQueue<
         let result;
         try {
           debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
-          result = await this.worker(job, this.#prisma);
+          result = await this.worker(job, this.prisma);
           debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
           const date = new Date();
           await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });

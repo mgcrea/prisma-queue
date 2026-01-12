@@ -1,11 +1,8 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import createDebug from "debug";
 import { env } from "prisma/config";
-import { PrismaClient } from "../../prisma";
+import { ClientOptions } from "src/types";
 
-const debug = createDebug("prisma-query");
-
-export const prisma = new PrismaClient({
+export const client = {
   adapter: new PrismaPg({ connectionString: env("DATABASE_URL") }),
   log: [
     {
@@ -25,13 +22,4 @@ export const prisma = new PrismaClient({
       level: "warn",
     },
   ],
-});
-
-prisma.$on("query", (queryEvent) => {
-  const { query, duration, params } = queryEvent;
-  debug(`${query} with params=${params} (took ${duration}ms)`);
-});
-
-// prisma.$use((params, next) => {
-
-// })
+} satisfies ClientOptions;
