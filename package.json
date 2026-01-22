@@ -48,27 +48,27 @@
     "debug": "^4.4.3"
   },
   "peerDependencies": {
-    "@prisma/client": ">=3"
+    "@prisma/client": ">=7"
   },
   "devDependencies": {
     "@mgcrea/eslint-config-node": "^0.14.1",
-    "@prisma/adapter-pg": "^7.2.0",
-    "@prisma/client": "7.2.0",
+    "@prisma/adapter-pg": "^7.3.0",
+    "@prisma/client": "^7.3.0",
     "@tsconfig/node-lts": "^24.0.0",
     "@tsconfig/strictest": "^2.0.8",
     "@types/debug": "^4.1.12",
-    "@types/node": "^24.10.6",
-    "@vitest/coverage-v8": "^4.0.16",
+    "@types/node": "^25.0.10",
+    "@vitest/coverage-v8": "^4.0.17",
     "dotenv-cli": "^11.0.0",
     "eslint": "^9.39.2",
-    "prettier": "^3.7.4",
+    "prettier": "^3.8.1",
     "prettier-plugin-organize-imports": "^4.3.0",
-    "prisma": "7.2.0",
+    "prisma": "^7.3.0",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite-tsconfig-paths": "^6.0.4",
-    "vitest": "^4.0.16"
+    "vitest": "^4.0.17"
   },
   "packageManager": "pnpm@10.28.0"
 }
