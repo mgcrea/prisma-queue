@@ -1,29 +1,20 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
-import { Prisma, PrismaClient } from "@prisma/client";
 import { Cron } from "croner";
 import { EventEmitter } from "events";
 import assert from "node:assert";
+import { Prisma, PrismaClient } from "../prisma";
 import { PrismaJob } from "./PrismaJob";
-import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker } from "./types";
-import {
-  AbortError,
-  calculateDelay,
-  debug,
-  escape,
-  getTableName,
-  serializeError,
-  uncapitalize,
-  waitFor,
-} from "./utils";
+import type { Adapter, DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker, Log } from "./types";
+import { AbortError, calculateDelay, debug, escape, serializeError, waitFor } from "./utils";
 
 export type PrismaQueueOptions = {
-  prisma?: PrismaClient;
+  adapter: Adapter;
+  log?: Log;
   name?: string;
   maxAttempts?: number | null;
   maxConcurrency?: number;
   pollInterval?: number;
   jobInterval?: number;
-  modelName?: string;
   tableName?: string;
   deleteOn?: "success" | "failure" | "always" | "never";
   /**
@@ -73,9 +64,9 @@ export class PrismaQueue<
   T extends JobPayload = JobPayload,
   U extends JobResult = JobResult,
 > extends EventEmitter {
-  #prisma: PrismaClient;
+  public client: PrismaClient;
   private name: string;
-  private config: Required<Omit<PrismaQueueOptions, "name" | "prisma">>;
+  private config: Required<Omit<PrismaQueueOptions, "name" | "adapter" | "log">>;
 
   private concurrency = 0;
   private stopped = true;
@@ -87,16 +78,19 @@ export class PrismaQueue<
    * @param worker - The worker function that processes jobs.
    */
   public constructor(
-    private options: PrismaQueueOptions = {},
+    private options: PrismaQueueOptions,
     public worker: JobWorker<T, U>,
   ) {
     super();
 
+    this.client = new PrismaClient({
+      adapter: options.adapter,
+      log: options.log ?? [],
+    });
+
     const {
-      prisma = new PrismaClient(),
       name = "default",
-      modelName = "QueueJob",
-      tableName = getTableName(modelName),
+      tableName = "queue_jobs",
       maxAttempts = null,
       maxConcurrency = DEFAULT_MAX_CONCURRENCY,
       pollInterval = DEFAULT_POLL_INTERVAL,
@@ -111,9 +105,7 @@ export class PrismaQueue<
     assert(jobInterval >= 10, "jobInterval must be more than 10 ms");
 
     this.name = name;
-    this.#prisma = prisma;
     this.config = {
-      modelName,
       tableName,
       maxAttempts,
       maxConcurrency,
@@ -140,14 +132,6 @@ export class PrismaQueue<
           "The queue now uses JavaScript Date objects instead of SQL NOW() to avoid timezone issues.",
       );
     }
-  }
-
-  /**
-   * Gets the Prisma delegate associated with the queue job model.
-   */
-  private get model(): Prisma.QueueJobDelegate {
-    const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
-    return this.#prisma[queueJobKey];
   }
 
   /**
@@ -214,10 +198,8 @@ export class PrismaQueue<
     debug(`enqueue`, this.name, payloadOrFunction, options);
     const { name: queueName, config } = this;
     const { key = null, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
-    const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
     const now = new Date();
-    const record = await this.#prisma.$transaction(async (client) => {
-      const model = client[queueJobKey];
+    const record = await this.client.$transaction(async (client) => {
       const payload =
         payloadOrFunction instanceof Function ? await payloadOrFunction(client) : payloadOrFunction;
       const data = {
@@ -231,7 +213,7 @@ export class PrismaQueue<
         runAt: runAt ?? now,
       };
       if (key && runAt) {
-        const { count } = await model.deleteMany({
+        const { count } = await client.queueJob.deleteMany({
           where: {
             queue: queueName,
             key,
@@ -244,17 +226,17 @@ export class PrismaQueue<
         if (count > 0) {
           debug(`deleted ${count} conflicting upcoming queue jobs`);
         }
-        return await model.upsert({
+        return await client.queueJob.upsert({
           where: { key_runAt: { key, runAt } },
           create: data,
           update: data,
         });
       }
-      return await model.create({ data });
+      return await client.queueJob.create({ data });
     });
     const job = new PrismaJob(record as DatabaseJob<T, U>, {
-      model: this.model,
-      client: this.#prisma,
+      tableName: this.config.tableName,
+      client: this.client,
     });
     this.emit("enqueue", job);
     return job;
@@ -347,9 +329,8 @@ export class PrismaQueue<
     const { name: queueName } = this;
     const { tableName: tableNameRaw, deleteOn } = this.config;
     const tableName = escape(tableNameRaw);
-    const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
     const now = new Date();
-    const job = await this.#prisma.$transaction(
+    const job = await this.client.$transaction(
       async (client) => {
         const rows = await client.$queryRawUnsafe<DatabaseJob<T, U>[]>(
           `UPDATE ${tableName} SET "processedAt" = $2, "attempts" = "attempts" + 1
@@ -375,13 +356,13 @@ export class PrismaQueue<
         }
         const { id, payload, attempts, maxAttempts } = rows[0];
         const job = new PrismaJob<T, U>(rows[0], {
-          model: client[queueJobKey],
+          tableName: this.config.tableName,
           client,
         });
         let result;
         try {
           debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
-          result = await this.worker(job, this.#prisma);
+          result = await this.worker(job, this.client);
           debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
           const date = new Date();
           await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });
@@ -443,7 +424,7 @@ export class PrismaQueue<
       where.runAt = { lte: date };
       where.AND = { OR: [{ notBefore: { lte: date } }, { notBefore: null }] };
     }
-    return await this.model.count({
+    return await this.client.queueJob.count({
       where,
     });
   }

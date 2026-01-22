@@ -1,19 +1,18 @@
-import type { Prisma } from "@prisma/client";
-import type { DatabaseJob, PrismaLightClient } from "./types";
-import { isPrismaError } from "./utils";
+import { Prisma } from "../prisma";
+import type { DatabaseJob, ITXClient } from "./types";
 // import { debug } from "./utils";
 
 export type PrismaJobOptions = {
-  model: Prisma.QueueJobDelegate;
-  client: PrismaLightClient;
+  tableName: string;
+  client: ITXClient;
 };
 
 /**
  * Represents a job within a Prisma-managed queue.
  */
 export class PrismaJob<Payload, Result> {
-  #model: Prisma.QueueJobDelegate;
-  #client: PrismaLightClient;
+  #tableName: string;
+  #client: ITXClient;
   #record: DatabaseJob<Payload, Result>;
 
   public readonly id;
@@ -25,8 +24,8 @@ export class PrismaJob<Payload, Result> {
    * @param model - The Prisma delegate used for database operations related to the job.
    * @param client - The Prisma client for executing arbitrary queries.
    */
-  constructor(record: DatabaseJob<Payload, Result>, { model, client }: PrismaJobOptions) {
-    this.#model = model;
+  constructor(record: DatabaseJob<Payload, Result>, { tableName, client }: PrismaJobOptions) {
+    this.#tableName = tableName;
     this.#client = client;
     this.#record = record;
     this.id = record.id;
@@ -110,7 +109,7 @@ export class PrismaJob<Payload, Result> {
    * Fetches the latest job record from the database and updates the internal state.
    */
   public async fetch(): Promise<DatabaseJob<Payload, Result>> {
-    const record = (await this.#model.findUnique({
+    const record = (await this.#client.queueJob.findUnique({
       where: { id: this.id },
     })) as DatabaseJob<Payload, Result>;
     this.#assign(record);
@@ -122,7 +121,7 @@ export class PrismaJob<Payload, Result> {
    * @param data - The new data to be merged with the existing job record.
    */
   public async update(data: Prisma.QueueJobUpdateInput): Promise<DatabaseJob<Payload, Result>> {
-    const record = (await this.#model.update({
+    const record = (await this.#client.queueJob.update({
       where: { id: this.id },
       data,
     })) as DatabaseJob<Payload, Result>;
@@ -134,7 +133,7 @@ export class PrismaJob<Payload, Result> {
    * Deletes the job from the database.
    */
   public async delete(): Promise<DatabaseJob<Payload, Result>> {
-    const record = (await this.#model.delete({
+    const record = (await this.#client.queueJob.delete({
       where: { id: this.id },
     })) as DatabaseJob<Payload, Result>;
     return record;
@@ -148,7 +147,7 @@ export class PrismaJob<Payload, Result> {
     try {
       // Attempt to select and lock the row with a timeout
       await this.#client.$executeRawUnsafe(
-        `SELECT "id" FROM "public"."queue_jobs" WHERE "id" = $1 FOR UPDATE NOWAIT`,
+        `SELECT "id" FROM "public"."${this.#tableName}" WHERE "id" = $1 FOR UPDATE NOWAIT`,
         this.id,
       );
 
@@ -156,9 +155,10 @@ export class PrismaJob<Payload, Result> {
       return false;
     } catch (error) {
       // Handle specific error types that indicate lock contention
-      if (isPrismaError(error) && error.meta?.["code"] === "55P03") {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
         // PostgreSQL's lock_not_available
-        return true;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+        return (error.meta as any)?.driverAdapterError?.cause?.code === "55P03";
       }
       // Re-throw other unexpected errors
       throw error;
