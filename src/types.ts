@@ -12,7 +12,7 @@ export type DatabaseJob<Payload, Result> = Simplify<
 export type JobCreator<T extends JobPayload> = (client: PrismaLightClient) => Promise<T>;
 export type JobWorker<T extends JobPayload = JobPayload, U extends JobResult = JobResult> = (
   job: PrismaJob<T, U>,
-  client: PrismaClient,
+  client: PrismaLightClient,
 ) => Promise<U>;
 
 export type PrismaLightClient = Omit<
