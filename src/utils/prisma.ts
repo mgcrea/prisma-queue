@@ -21,6 +21,11 @@ export const getTableName = (modelName: string): string => {
   } catch {
     // DMMF not available (edge environment or separately generated Prisma client)
   }
-  // Fallback to conventional snake_case table name
-  return toSnakeCase(modelName);
+  // Fallback to conventional plural snake_case table name
+  const snakeName = toSnakeCase(modelName);
+  console.warn(
+    `[prisma-queue] DMMF not available, falling back to inferred table name "${snakeName}s". ` +
+      `If this is incorrect, provide the "tableName" option explicitly.`,
+  );
+  return snakeName + "s";
 };
