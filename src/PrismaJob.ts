@@ -6,6 +6,7 @@ import { isPrismaError } from "./utils";
 export type PrismaJobOptions = {
   model: Prisma.QueueJobDelegate;
   client: PrismaLightClient;
+  tableName: string;
 };
 
 /**
@@ -14,10 +15,11 @@ export type PrismaJobOptions = {
 export class PrismaJob<Payload, Result> {
   #model: Prisma.QueueJobDelegate;
   #client: PrismaLightClient;
+  #tableName: string;
   #record: DatabaseJob<Payload, Result>;
 
   public readonly id;
-  public readonly createdAt: Date = new Date();
+  public readonly createdAt: Date;
 
   /**
    * Constructs a new PrismaJob instance with the provided job record and database access objects.
@@ -25,11 +27,13 @@ export class PrismaJob<Payload, Result> {
    * @param model - The Prisma delegate used for database operations related to the job.
    * @param client - The Prisma client for executing arbitrary queries.
    */
-  constructor(record: DatabaseJob<Payload, Result>, { model, client }: PrismaJobOptions) {
+  constructor(record: DatabaseJob<Payload, Result>, { model, client, tableName }: PrismaJobOptions) {
     this.#model = model;
     this.#client = client;
+    this.#tableName = tableName;
     this.#record = record;
     this.id = record.id;
+    this.createdAt = record.createdAt;
   }
 
   /**
@@ -148,7 +152,7 @@ export class PrismaJob<Payload, Result> {
     try {
       // Attempt to select and lock the row with a timeout
       await this.#client.$executeRawUnsafe(
-        `SELECT "id" FROM "public"."queue_jobs" WHERE "id" = $1 FOR UPDATE NOWAIT`,
+        `SELECT "id" FROM ${this.#tableName} WHERE "id" = $1 FOR UPDATE NOWAIT`,
         this.id,
       );
 
