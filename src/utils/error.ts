@@ -16,10 +16,5 @@ export const serializeError = (err: unknown) => {
 };
 
 export const isPrismaError = (error: unknown): error is Prisma.PrismaClientKnownRequestError => {
-  return (
-    error instanceof Error &&
-    "code" in error &&
-    "clientVersion" in error &&
-    "meta" in error
-  );
+  return error instanceof Error && "code" in error && "clientVersion" in error && "meta" in error;
 };

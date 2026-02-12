@@ -360,7 +360,7 @@ export class PrismaQueue<
 
     // Collect deferred events to emit after transaction
     let successResult: U | undefined;
-    let errorResult: unknown | undefined;
+    let errorResult: unknown;
 
     const job = await this.#prisma.$transaction(
       async (client) => {
