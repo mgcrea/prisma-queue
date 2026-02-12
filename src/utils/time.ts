@@ -7,15 +7,23 @@ export class AbortError extends Error {
 
 export const waitFor = async (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new AbortError("Aborted"));
+      return;
+    }
+
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new AbortError("Aborted"));
+    };
+
     const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
       resolve();
     }, ms);
 
     if (signal) {
-      signal.addEventListener("abort", () => {
-        clearTimeout(timeout);
-        reject(new AbortError("Aborted"));
-      });
+      signal.addEventListener("abort", onAbort, { once: true });
     }
   });
 
