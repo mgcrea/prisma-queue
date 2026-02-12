@@ -26,6 +26,8 @@ export type PrismaQueueOptions = {
   modelName?: string;
   tableName?: string;
   deleteOn?: "success" | "failure" | "always" | "never";
+  /** Transaction timeout in milliseconds for job processing. Defaults to 30 minutes. */
+  transactionTimeout?: number;
   /**
    * @deprecated This option is deprecated and will be removed in a future version.
    * The queue now uses JavaScript Date objects instead of SQL NOW() to avoid timezone issues.
@@ -102,6 +104,7 @@ export class PrismaQueue<
       pollInterval = DEFAULT_POLL_INTERVAL,
       jobInterval = DEFAULT_JOB_INTERVAL,
       deleteOn = DEFAULT_DELETE_ON,
+      transactionTimeout = 30 * 60 * 1000,
       // eslint-disable-next-line @typescript-eslint/no-deprecated
       alignTimeZone = false,
     } = this.options;
@@ -120,6 +123,7 @@ export class PrismaQueue<
       pollInterval,
       jobInterval,
       deleteOn,
+      transactionTimeout,
       alignTimeZone,
     };
 
@@ -199,8 +203,10 @@ export class PrismaQueue<
    * @param payloadOrFunction - The job payload or a function that returns a job payload.
    * @param options - Options for the job, such as scheduling and attempts.
    */
-  // eslint-disable-next-line @typescript-eslint/unbound-method
-  public add = this.enqueue;
+  public add = (
+    payloadOrFunction: T | JobCreator<T>,
+    options: EnqueueOptions = {},
+  ): Promise<PrismaJob<T, U>> => this.enqueue(payloadOrFunction, options);
 
   /**
    * Adds a job to the queue.
@@ -252,9 +258,11 @@ export class PrismaQueue<
       }
       return await model.create({ data });
     });
+    const tableName = escape(this.config.tableName);
     const job = new PrismaJob(record as DatabaseJob<T, U>, {
       model: this.model,
       client: this.#prisma,
+      tableName,
     });
     this.emit("enqueue", job);
     return job;
@@ -345,10 +353,15 @@ export class PrismaQueue<
     }
     debug(`dequeuing from queue named="${this.name}"...`);
     const { name: queueName } = this;
-    const { tableName: tableNameRaw, deleteOn } = this.config;
+    const { tableName: tableNameRaw, deleteOn, transactionTimeout } = this.config;
     const tableName = escape(tableNameRaw);
     const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
     const now = new Date();
+
+    // Collect deferred events to emit after transaction
+    let successResult: U | undefined;
+    let errorResult: unknown | undefined;
+
     const job = await this.#prisma.$transaction(
       async (client) => {
         const rows = await client.$queryRawUnsafe<DatabaseJob<T, U>[]>(
@@ -377,15 +390,16 @@ export class PrismaQueue<
         const job = new PrismaJob<T, U>(rows[0], {
           model: client[queueJobKey],
           client,
+          tableName,
         });
         let result;
         try {
           debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
-          result = await this.worker(job, this.#prisma);
+          result = await this.worker(job, client);
           debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
           const date = new Date();
           await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });
-          this.emit("success", result, job);
+          successResult = result;
           if (deleteOn === "success" || deleteOn === "always") {
             await job.delete();
           }
@@ -405,7 +419,7 @@ export class PrismaQueue<
             error: serializeError(error),
             notBefore: isFinished ? null : notBefore,
           });
-          this.emit("error", error, job);
+          errorResult = error;
           if (deleteOn === "failure" || deleteOn === "always") {
             await job.delete();
           }
@@ -413,17 +427,29 @@ export class PrismaQueue<
         return job;
       },
       // @NOTE https://github.com/prisma/prisma/issues/11565#issuecomment-1031380271
-      { timeout: 864e5 },
+      { timeout: transactionTimeout },
     );
+
     if (job) {
+      // Emit events in logical order: dequeue first, then success/error
       this.emit("dequeue", job);
+      if (successResult !== undefined) {
+        this.emit("success", successResult, job);
+      } else if (errorResult !== undefined) {
+        this.emit("error", errorResult, job);
+      }
+
       const { key, cron, payload, finishedAt } = job;
       if (finishedAt && cron && key) {
         // Schedule next cron
         debug(
           `scheduling next cron job({key: ${key}, cron: ${cron}}) with payload=${JSON.stringify(payload)}`,
         );
-        await this.schedule({ key, cron }, payload);
+        try {
+          await this.schedule({ key, cron }, payload);
+        } catch (scheduleError) {
+          this.emit("error", scheduleError);
+        }
       }
     }
 
@@ -432,6 +458,9 @@ export class PrismaQueue<
 
   /**
    * Counts the number of jobs in the queue, optionally only those available for processing.
+   * Note: When onlyAvailable is true, the count may include jobs currently being processed
+   * by other workers. This is by design — the dequeue query uses SKIP LOCKED to handle
+   * concurrent access, so a slightly inflated count only results in benign no-op dequeue attempts.
    * @param {boolean} onlyAvailable - If true, counts only jobs that are ready to be processed.
    * @returns {Promise<number>} The number of jobs.
    */
