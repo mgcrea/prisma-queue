@@ -4,7 +4,15 @@ import { Cron } from "croner";
 import { EventEmitter } from "events";
 import assert from "node:assert";
 import { PrismaJob } from "./PrismaJob";
-import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker, PrismaLightClient } from "./types";
+import type {
+  DatabaseJob,
+  JobCreator,
+  JobPayload,
+  JobResult,
+  JobWorker,
+  PrismaLightClient,
+  RetryStrategy,
+} from "./types";
 import { AbortError, calculateDelay, debug, escape, getTableName, serializeError, waitFor } from "./utils";
 
 export type PrismaQueueOptions = {
@@ -18,6 +26,8 @@ export type PrismaQueueOptions = {
   deleteOn?: "success" | "failure" | "always" | "never";
   /** Transaction timeout in milliseconds for job processing. Defaults to 30 minutes. */
   transactionTimeout?: number;
+  /** Custom retry strategy. Returns delay in ms, or null to stop retrying. */
+  retryStrategy?: RetryStrategy;
 };
 
 export type EnqueueOptions = {
@@ -54,6 +64,10 @@ const DEFAULT_MAX_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 10 * 1000;
 const DEFAULT_JOB_INTERVAL = 50;
 const DEFAULT_DELETE_ON = "never";
+const defaultRetryStrategy: RetryStrategy = ({ attempts, maxAttempts }) => {
+  if (maxAttempts !== null && attempts >= maxAttempts) return null;
+  return calculateDelay(attempts);
+};
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class PrismaQueue<
@@ -91,6 +105,7 @@ export class PrismaQueue<
       jobInterval = DEFAULT_JOB_INTERVAL,
       deleteOn = DEFAULT_DELETE_ON,
       transactionTimeout = 30 * 60 * 1000,
+      retryStrategy = defaultRetryStrategy,
     } = this.options;
 
     assert(name.length <= 255, "name must be less or equal to 255 chars");
@@ -112,6 +127,7 @@ export class PrismaQueue<
       jobInterval,
       deleteOn,
       transactionTimeout,
+      retryStrategy,
     };
 
     // Default error handler
@@ -394,17 +410,25 @@ export class PrismaQueue<
           debug(
             `failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${String(error)}"`,
           );
-          const isFinished = maxAttempts && attempts >= maxAttempts;
-          const notBefore = new Date(date.getTime() + calculateDelay(attempts));
+          const delay = this.config.retryStrategy({ attempts, maxAttempts, error });
+          const isFinished = delay === null;
           if (!isFinished) {
+            const notBefore = new Date(date.getTime() + delay);
             debug(`will retry at notBefore=${notBefore.toISOString()} (attempts=${attempts})`);
+            await job.update({
+              finishedAt: null,
+              failedAt: date,
+              error: serializeError(error),
+              notBefore,
+            });
+          } else {
+            await job.update({
+              finishedAt: date,
+              failedAt: date,
+              error: serializeError(error),
+              notBefore: null,
+            });
           }
-          await job.update({
-            finishedAt: isFinished ? date : null,
-            failedAt: date,
-            error: serializeError(error),
-            notBefore: isFinished ? null : notBefore,
-          });
           errorResult = error;
           if (deleteOn === "failure" || deleteOn === "always") {
             await job.delete();

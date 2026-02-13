@@ -19,3 +19,11 @@ export type PrismaLightClient = Omit<
   PrismaClient,
   "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
 >;
+
+export type RetryContext = {
+  attempts: number;
+  maxAttempts: number | null;
+  error: unknown;
+};
+
+export type RetryStrategy = (context: RetryContext) => number | null;

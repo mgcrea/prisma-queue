@@ -246,7 +246,8 @@ describe("PrismaQueue", () => {
     });
     it("should expose a non-aborted signal on dequeued job", async () => {
       let jobSignal: AbortSignal | undefined;
-      queue.worker = vi.fn(async (job) => {
+      // eslint-disable-next-line @typescript-eslint/require-await
+      queue.worker = vi.fn(async (job: EmailJob) => {
         jobSignal = job.signal;
         return { code: "200" };
       });
@@ -255,11 +256,11 @@ describe("PrismaQueue", () => {
       await waitForNextJob(queue);
       await queue.stop();
       expect(jobSignal).toBeInstanceOf(AbortSignal);
-      expect(jobSignal!.aborted).toBe(false);
+      expect(jobSignal?.aborted).toBe(false);
     });
     it("should abort signal when queue is stopped", async () => {
       let jobSignal: AbortSignal | undefined;
-      queue.worker = vi.fn(async (job) => {
+      queue.worker = vi.fn(async (job: EmailJob) => {
         jobSignal = job.signal;
         await waitFor(2000);
         return { code: "200" };
@@ -268,9 +269,54 @@ describe("PrismaQueue", () => {
       void queue.start();
       await waitFor(400);
       expect(jobSignal).toBeDefined();
-      expect(jobSignal!.aborted).toBe(false);
+      expect(jobSignal?.aborted).toBe(false);
       await queue.stop({ timeout: 5000 });
-      expect(jobSignal!.aborted).toBe(true);
+      expect(jobSignal?.aborted).toBe(true);
+    });
+  });
+
+  describe("retryStrategy", () => {
+    it("should use custom retry strategy", async () => {
+      const retryDelays: number[] = [];
+      const queue = createEmailQueue({
+        maxAttempts: 3,
+        pollInterval: 200,
+        retryStrategy: ({ attempts, maxAttempts }) => {
+          if (maxAttempts !== null && attempts >= maxAttempts) return null;
+          const delay = 100 * attempts;
+          retryDelays.push(delay);
+          return delay;
+        },
+      });
+      await prisma.queueJob.deleteMany();
+      // eslint-disable-next-line @typescript-eslint/require-await
+      queue.worker = vi.fn(async () => {
+        throw new Error("always fails");
+      });
+      await queue.enqueue({ email: "retry@test.com" });
+      void queue.start();
+      await waitForNthJob(queue, 3);
+      await queue.stop();
+      expect(queue.worker).toHaveBeenCalledTimes(3);
+      expect(retryDelays).toEqual([100, 200]);
+    });
+    it("should stop retrying when strategy returns null", async () => {
+      const queue = createEmailQueue({
+        pollInterval: 200,
+        retryStrategy: () => null,
+      });
+      await prisma.queueJob.deleteMany();
+      // eslint-disable-next-line @typescript-eslint/require-await
+      queue.worker = vi.fn(async () => {
+        throw new Error("fails once");
+      });
+      const job = await queue.enqueue({ email: "no-retry@test.com" });
+      void queue.start();
+      await waitForNextJob(queue);
+      await queue.stop();
+      expect(queue.worker).toHaveBeenCalledTimes(1);
+      const record = await job.fetch();
+      expect(record.finishedAt).toBeInstanceOf(Date);
     });
   });
 
