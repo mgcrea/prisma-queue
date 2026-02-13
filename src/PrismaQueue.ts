@@ -71,6 +71,7 @@ export class PrismaQueue<
   U extends JobResult = JobResult,
 > extends EventEmitter {
   #prisma: PrismaClient;
+  #escapedTableName: string;
   private name: string;
   private config: Required<Omit<PrismaQueueOptions, "name" | "prisma">>;
 
@@ -108,6 +109,7 @@ export class PrismaQueue<
 
     this.name = name;
     this.#prisma = prisma;
+    this.#escapedTableName = escape(tableName);
     this.config = {
       modelName,
       tableName,
@@ -242,11 +244,10 @@ export class PrismaQueue<
       }
       return await model.create({ data });
     });
-    const tableName = escape(this.config.tableName);
     const job = new PrismaJob(record as DatabaseJob<T, U>, {
       model: this.model,
       client: this.#prisma,
-      tableName,
+      tableName: this.#escapedTableName,
     });
     this.emit("enqueue", job);
     return job;
@@ -340,8 +341,8 @@ export class PrismaQueue<
     }
     debug(`dequeuing from queue named="${this.name}"...`);
     const { name: queueName } = this;
-    const { tableName: tableNameRaw, deleteOn, transactionTimeout } = this.config;
-    const tableName = escape(tableNameRaw);
+    const { deleteOn, transactionTimeout } = this.config;
+    const tableName = this.#escapedTableName;
     const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
     const now = new Date();
 
