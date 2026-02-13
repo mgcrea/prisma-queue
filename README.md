@@ -30,6 +30,9 @@ Simple, reliable and efficient concurrent work queue for [Prisma](https://prisma
 
 - Leverages PostgreSQL [SKIP LOCKED](https://www.2ndquadrant.com/en/blog/what-is-select-skip-locked-for-in-postgresql-9-5/) feature to reliably dequeue jobs
 - Supports [crontab](https://crontab.guru) syntax for complex scheduled jobs
+- Pluggable retry strategies with exponential backoff by default
+- Cooperative worker cancellation via `AbortSignal`
+- Separate `jobError` / `error` events for clean observability
 - Written in [TypeScript](https://www.typescriptlang.org/) for static type checking with exported types along the library.
 - Built by [tsup](https://tsup.egoist.dev) to provide both CommonJS and ESM packages.
 
@@ -42,15 +45,6 @@ pnpm add @mgcrea/prisma-queue
 ```
 
 ## Quickstart
-
-1. If you use an old version of Prisma ranging from 2.29.0 to 4.6.1 (included), you must first add `"interactiveTransactions"` to your `schema.prisma` client configuration:
-
-```prisma
-generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["interactiveTransactions"]
-}
-```
 
 1. Append the [`QueueJob` model](./prisma/schema.prisma) to your `schema.prisma` file
 
@@ -115,15 +109,66 @@ main();
 
 ## Advanced usage
 
-### Edge Environments
+### Options
 
-When using this library in edge environments (Cloudflare Workers, Vercel Edge Functions, etc.) where Prisma's DMMF (Datamodel Meta Format) may not be available, you should explicitly provide the `tableName` option:
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `prisma` | `PrismaClient` | `new PrismaClient()` | Prisma client instance |
+| `name` | `string` | `"default"` | Queue name for partitioning jobs |
+| `maxAttempts` | `number \| null` | `null` | Max retry attempts (`null` = unlimited) |
+| `maxConcurrency` | `number` | `1` | Max concurrent jobs |
+| `pollInterval` | `number` | `10000` | Polling interval in ms |
+| `jobInterval` | `number` | `50` | Delay between job dispatches in ms |
+| `tableName` | `string` | Auto-detected | Database table name (required in edge environments) |
+| `deleteOn` | `"success" \| "failure" \| "always" \| "never"` | `"never"` | When to delete completed jobs |
+| `transactionTimeout` | `number` | `1800000` | Transaction timeout in ms (30 min) |
+| `retryStrategy` | `RetryStrategy` | Exponential backoff | Custom retry logic |
+
+### Events
+
+The queue emits typed events:
 
 ```ts
-export const emailQueue = createQueue<JobPayload, JobResult>(
+queue.on("enqueue", (job) => {
+  console.log(`Job ${job.id} enqueued`);
+});
+
+queue.on("dequeue", (job) => {
+  console.log(`Job ${job.id} picked up for processing`);
+});
+
+queue.on("success", (result, job) => {
+  console.log(`Job ${job.id} succeeded with`, result);
+});
+
+// Job execution failures (worker threw)
+queue.on("jobError", (error, job) => {
+  console.error(`Job ${job.id} failed:`, error);
+});
+
+// System/infrastructure errors (poll failures, cron scheduling errors)
+queue.on("error", (error) => {
+  console.error("Queue system error:", error);
+});
+```
+
+### Custom Retry Strategy
+
+By default, failed jobs are retried with exponential backoff (2^attempts seconds + jitter). You can provide a custom `retryStrategy`:
+
+```ts
+import { createQueue, type RetryContext } from "@mgcrea/prisma-queue";
+
+const queue = createQueue(
   {
     name: "email",
-    tableName: "queue_jobs", // Explicit table name for edge environments
+    maxAttempts: 5,
+    retryStrategy: ({ attempts, maxAttempts, error }: RetryContext) => {
+      // Return delay in ms, or null to stop retrying
+      if (maxAttempts !== null && attempts >= maxAttempts) return null;
+      // Linear backoff: 1s, 2s, 3s, ...
+      return 1000 * attempts;
+    },
   },
   async (job, client) => {
     // ...
@@ -131,7 +176,39 @@ export const emailQueue = createQueue<JobPayload, JobResult>(
 );
 ```
 
-The library will throw an error if DMMF is unavailable and no `tableName` is provided. In edge environments, always provide `tableName` explicitly.
+### Cooperative Worker Cancellation
+
+Dequeued jobs expose an `AbortSignal` that is triggered when `queue.stop()` is called. Use it to cooperatively cancel long-running work:
+
+```ts
+const queue = createQueue({ name: "email" }, async (job, client) => {
+  for (const item of items) {
+    if (job.signal.aborted) {
+      throw new Error("Job cancelled");
+    }
+    await processItem(item);
+  }
+  return { status: "done" };
+});
+```
+
+### Edge Environments
+
+When using this library in edge environments (Cloudflare Workers, Vercel Edge Functions, etc.) where Prisma's DMMF (Datamodel Meta Format) may not be available, you must provide the `tableName` option:
+
+```ts
+export const emailQueue = createQueue<JobPayload, JobResult>(
+  {
+    name: "email",
+    tableName: "queue_jobs", // Required in edge environments
+  },
+  async (job, client) => {
+    // ...
+  },
+);
+```
+
+The library will throw an error if DMMF is unavailable and no `tableName` is provided.
 
 ### Threading
 
@@ -224,12 +301,32 @@ process.exit(0);
 
 ## Migration Guide
 
-### Breaking Changes (v2)
+### Migrating from v1 to v2
 
-- **Worker receives transactional client**: The worker callback's second parameter is now the Prisma transactional client (`PrismaLightClient`) instead of the root `PrismaClient`. Operations like `$transaction`, `$connect`, `$disconnect`, `$on`, `$use`, or `$extends` are not available inside the worker — perform those outside the worker.
-- **`alignTimeZone` option removed**: This option was deprecated and has been removed. Timezone alignment is no longer needed.
-- **`transactionTimeout` option added**: Defaults to 30 minutes (was hardcoded at 24 hours). Configure via the `transactionTimeout` option in milliseconds.
-- **Edge environments require explicit `tableName`**: The library no longer guesses the table name when DMMF is unavailable. Provide the `tableName` option explicitly.
+**Worker receives transactional client**: The worker callback's second parameter is now the Prisma transactional client (`PrismaLightClient`) instead of the root `PrismaClient`. Operations like `$transaction`, `$connect`, `$disconnect`, `$on`, `$use`, or `$extends` are not available inside the worker — perform those outside the worker.
+
+**`modelName` option removed**: The library now resolves the Prisma delegate once in the constructor. If you were passing `modelName`, remove it — the library only supports the `QueueJob` model. Use `tableName` to override the database table name if needed.
+
+**Error events split**: The `error` event no longer includes a `job` parameter. Worker failures now emit `jobError` instead:
+
+```ts
+// v1
+queue.on("error", (error, job?) => { /* both job and system errors */ });
+
+// v2
+queue.on("jobError", (error, job) => { /* job execution failures */ });
+queue.on("error", (error) => { /* system/infrastructure errors */ });
+```
+
+**`retryStrategy` replaces hardcoded backoff**: The retry logic is now configurable. The default behavior is preserved, but if you were relying on the exact backoff timing, note that it's now driven by the `retryStrategy` option.
+
+**`alignTimeZone` option removed**: This option was deprecated and has been removed.
+
+**`transactionTimeout` option added**: Defaults to 30 minutes (was hardcoded at 24 hours). Configure via the `transactionTimeout` option in milliseconds.
+
+**Edge environments require explicit `tableName`**: The library now throws if DMMF is unavailable and no `tableName` is provided (previously it guessed using `snake_case + "s"`).
+
+**Database index reordered**: The index on `QueueJob` changed from `[queue, priority, runAt, finishedAt]` to `[queue, finishedAt, priority, runAt]`. Run a Prisma migration to update the index after upgrading.
 
 ## Authors
 
