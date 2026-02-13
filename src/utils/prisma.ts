@@ -1,16 +1,8 @@
 import { Prisma } from "@prisma/client";
 
 /**
- * Converts a PascalCase model name to snake_case table name.
- * @example "QueueJob" -> "queue_job"
- */
-const toSnakeCase = (str: string): string => {
-  return str.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase();
-};
-
-/**
  * Gets the database table name for a Prisma model.
- * Falls back to snake_case conversion if DMMF is not available (e.g., edge environments).
+ * Throws if DMMF is not available (e.g., edge environments) — provide `tableName` explicitly.
  */
 export const getTableName = (modelName: string): string => {
   try {
@@ -21,11 +13,8 @@ export const getTableName = (modelName: string): string => {
   } catch {
     // DMMF not available (edge environment or separately generated Prisma client)
   }
-  // Fallback to conventional plural snake_case table name
-  const snakeName = toSnakeCase(modelName);
-  console.warn(
-    `[prisma-queue] DMMF not available, falling back to inferred table name "${snakeName}s". ` +
-      `If this is incorrect, provide the "tableName" option explicitly.`,
+  throw new Error(
+    `[prisma-queue] Could not resolve table name for model "${modelName}" (DMMF not available). ` +
+      `Please provide the "tableName" option explicitly.`,
   );
-  return snakeName + "s";
 };
