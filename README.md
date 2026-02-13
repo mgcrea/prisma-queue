@@ -123,7 +123,7 @@ When using this library in edge environments (Cloudflare Workers, Vercel Edge Fu
 export const emailQueue = createQueue<JobPayload, JobResult>(
   {
     name: "email",
-    tableName: "queue_job", // Explicit table name for edge environments
+    tableName: "queue_jobs", // Explicit table name for edge environments
   },
   async (job, client) => {
     // ...
@@ -131,7 +131,7 @@ export const emailQueue = createQueue<JobPayload, JobResult>(
 );
 ```
 
-The library will automatically fall back to a snake_case conversion of the model name (e.g., `QueueJob` → `queue_job`) if DMMF is unavailable, but providing `tableName` explicitly is recommended for edge deployments.
+The library will throw an error if DMMF is unavailable and no `tableName` is provided. In edge environments, always provide `tableName` explicitly.
 
 ### Threading
 
@@ -221,6 +221,15 @@ log.info(`Worker for queue=${queue} completed with result=${JSON.stringify(resul
 parentPort?.postMessage(result);
 process.exit(0);
 ```
+
+## Migration Guide
+
+### Breaking Changes (v2)
+
+- **Worker receives transactional client**: The worker callback's second parameter is now the Prisma transactional client (`PrismaLightClient`) instead of the root `PrismaClient`. Operations like `$transaction`, `$connect`, `$disconnect`, `$on`, `$use`, or `$extends` are not available inside the worker — perform those outside the worker.
+- **`alignTimeZone` option removed**: This option was deprecated and has been removed. Timezone alignment is no longer needed.
+- **`transactionTimeout` option added**: Defaults to 30 minutes (was hardcoded at 24 hours). Configure via the `transactionTimeout` option in milliseconds.
+- **Edge environments require explicit `tableName`**: The library no longer guesses the table name when DMMF is unavailable. Provide the `tableName` option explicitly.
 
 ## Authors
 
