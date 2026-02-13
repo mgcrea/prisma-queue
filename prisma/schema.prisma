@@ -32,6 +32,6 @@ model QueueJob {
   updatedAt   DateTime  @updatedAt
 
   @@unique([key, runAt])
-  @@index([queue, finishedAt, priority, runAt])
+  @@index([queue, finishedAt, processedAt, priority, runAt])
   @@map("queue_jobs")
 }
