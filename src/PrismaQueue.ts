@@ -28,11 +28,6 @@ export type PrismaQueueOptions = {
   deleteOn?: "success" | "failure" | "always" | "never";
   /** Transaction timeout in milliseconds for job processing. Defaults to 30 minutes. */
   transactionTimeout?: number;
-  /**
-   * @deprecated This option is deprecated and will be removed in a future version.
-   * The queue now uses JavaScript Date objects instead of SQL NOW() to avoid timezone issues.
-   */
-  alignTimeZone?: boolean;
 };
 
 export type EnqueueOptions = {
@@ -105,8 +100,6 @@ export class PrismaQueue<
       jobInterval = DEFAULT_JOB_INTERVAL,
       deleteOn = DEFAULT_DELETE_ON,
       transactionTimeout = 30 * 60 * 1000,
-      // eslint-disable-next-line @typescript-eslint/no-deprecated
-      alignTimeZone = false,
     } = this.options;
 
     assert(name.length <= 255, "name must be less or equal to 255 chars");
@@ -124,7 +117,6 @@ export class PrismaQueue<
       jobInterval,
       deleteOn,
       transactionTimeout,
-      alignTimeZone,
     };
 
     // Default error handler
@@ -136,14 +128,6 @@ export class PrismaQueue<
         error,
       );
     });
-
-    // Warn about deprecated alignTimeZone option
-    if (alignTimeZone) {
-      console.warn(
-        "[prisma-queue] The alignTimeZone option is deprecated and will be removed in a future version. " +
-          "The queue now uses JavaScript Date objects instead of SQL NOW() to avoid timezone issues.",
-      );
-    }
   }
 
   /**
