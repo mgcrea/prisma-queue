@@ -245,18 +245,17 @@ describe("PrismaQueue", () => {
       void queue.stop();
     });
     it("should expose a non-aborted signal on dequeued job", async () => {
-      let jobSignal: AbortSignal | undefined;
+      let signalAbortedDuringWork: boolean | undefined;
       // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async (job: EmailJob) => {
-        jobSignal = job.signal;
+        signalAbortedDuringWork = job.signal.aborted;
         return { code: "200" };
       });
       await queue.enqueue({ email: "foo@bar.com" });
       void queue.start();
       await waitForNextJob(queue);
       await queue.stop();
-      expect(jobSignal).toBeInstanceOf(AbortSignal);
-      expect(jobSignal?.aborted).toBe(false);
+      expect(signalAbortedDuringWork).toBe(false);
     });
     it("should abort signal when queue is stopped", async () => {
       let jobSignal: AbortSignal | undefined;
