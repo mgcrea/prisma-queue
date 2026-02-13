@@ -326,7 +326,7 @@ export class PrismaQueue<
         // Emit error and continue polling after a delay
         this.emit("error", error);
         // eslint-disable-next-line @typescript-eslint/no-empty-function
-        await waitFor(pollInterval).catch(() => {});
+        await waitFor(pollInterval, this.abortController.signal).catch(() => {});
       }
     }
   }
