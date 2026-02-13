@@ -123,6 +123,7 @@ main();
 | `deleteOn` | `"success" \| "failure" \| "always" \| "never"` | `"never"` | When to delete completed jobs |
 | `transactionTimeout` | `number` | `1800000` | Transaction timeout in ms (30 min) |
 | `retryStrategy` | `RetryStrategy` | Exponential backoff | Custom retry logic |
+| `transactional` | `boolean` | `true` | Run worker inside the dequeue transaction |
 
 ### Events
 
@@ -191,6 +192,35 @@ const queue = createQueue({ name: "email" }, async (job, client) => {
   return { status: "done" };
 });
 ```
+
+### Non-Transactional Mode
+
+By default, the worker runs inside the dequeue transaction (exactly-once semantics). Set `transactional: false` to run the worker outside the transaction, giving it access to the full `PrismaClient` with `$transaction` support (at-least-once semantics):
+
+```ts
+import { createQueue, type JobWorkerWithClient } from "@mgcrea/prisma-queue";
+
+const queue = createQueue<JobPayload, JobResult>(
+  { name: "email", transactional: false },
+  async (job, client) => {
+    // client is the full PrismaClient — $transaction is available
+    await client.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: 1 }, data: { email: job.payload.email } });
+      await tx.auditLog.create({ data: { action: "email_updated" } });
+    });
+    return { status: 200 };
+  },
+);
+```
+
+**Trade-offs**: In non-transactional mode, a process crash between claiming and completing a job can leave it "stuck" (`processedAt` set, `finishedAt` null). Use `requeueStale()` to recover:
+
+```ts
+// Requeue jobs claimed more than 5 minutes ago that never completed
+const count = await queue.requeueStale({ olderThanMs: 5 * 60 * 1000 });
+```
+
+Note: `isLocked()` returns `false` during worker execution in non-transactional mode since the row lock is released after claiming.
 
 ### Edge Environments
 
@@ -326,7 +356,13 @@ queue.on("error", (error) => { /* system/infrastructure errors */ });
 
 **Edge environments require explicit `tableName`**: The library now throws if DMMF is unavailable and no `tableName` is provided (previously it guessed using `snake_case + "s"`).
 
-**Database index reordered**: The index on `QueueJob` changed from `[queue, priority, runAt, finishedAt]` to `[queue, finishedAt, priority, runAt]`. Run a Prisma migration to update the index after upgrading.
+**Database index reordered**: The index on `QueueJob` changed from `[queue, priority, runAt, finishedAt]` to `[queue, finishedAt, processedAt, priority, runAt]`. Run a Prisma migration to update the index after upgrading.
+
+**Dequeue now filters on `processedAt IS NULL`**: The dequeue query now requires `processedAt` to be null. Existing in-flight or crashed jobs with non-null `processedAt` and null `finishedAt` will no longer be picked up. Run this migration during a drained-queue window:
+
+```sql
+UPDATE queue_jobs SET "processedAt" = NULL WHERE "finishedAt" IS NULL;
+```
 
 ## Authors
 
