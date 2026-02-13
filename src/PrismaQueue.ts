@@ -371,6 +371,7 @@ export class PrismaQueue<
              FROM ${tableName}
              WHERE (${tableName}."queue" = $1)
                AND (${tableName}."finishedAt" IS NULL)
+               AND (${tableName}."processedAt" IS NULL)
                AND (${tableName}."runAt" <= $2)
                AND (${tableName}."notBefore" IS NULL OR ${tableName}."notBefore" <= $2)
              ORDER BY ${tableName}."priority" ASC, ${tableName}."runAt" ASC
@@ -415,6 +416,7 @@ export class PrismaQueue<
             const notBefore = new Date(date.getTime() + delay);
             debug(`will retry at notBefore=${notBefore.toISOString()} (attempts=${attempts})`);
             await job.update({
+              processedAt: null,
               finishedAt: null,
               failedAt: date,
               error: serializeError(error),
@@ -479,6 +481,7 @@ export class PrismaQueue<
     const where: Prisma.QueueJobWhereInput = { queue: queueName, finishedAt: null };
     if (onlyAvailable) {
       where.runAt = { lte: date };
+      where.processedAt = null;
       where.AND = { OR: [{ notBefore: { lte: date } }, { notBefore: null }] };
     }
     return await this.model.count({
