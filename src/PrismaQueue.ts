@@ -376,6 +376,7 @@ export class PrismaQueue<
           model: this.getModel(client),
           client,
           tableName,
+          signal: this.abortController.signal,
         });
         let result;
         try {

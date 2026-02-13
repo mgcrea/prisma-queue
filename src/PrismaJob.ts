@@ -7,6 +7,7 @@ export type PrismaJobOptions = {
   model: Prisma.QueueJobDelegate;
   client: PrismaLightClient;
   tableName: string;
+  signal?: AbortSignal;
 };
 
 /**
@@ -20,6 +21,7 @@ export class PrismaJob<Payload, Result> {
 
   public readonly id;
   public readonly createdAt: Date;
+  public readonly signal: AbortSignal;
 
   /**
    * Constructs a new PrismaJob instance with the provided job record and database access objects.
@@ -27,13 +29,14 @@ export class PrismaJob<Payload, Result> {
    * @param model - The Prisma delegate used for database operations related to the job.
    * @param client - The Prisma client for executing arbitrary queries.
    */
-  constructor(record: DatabaseJob<Payload, Result>, { model, client, tableName }: PrismaJobOptions) {
+  constructor(record: DatabaseJob<Payload, Result>, { model, client, tableName, signal }: PrismaJobOptions) {
     this.#model = model;
     this.#client = client;
     this.#tableName = tableName;
     this.#record = record;
     this.id = record.id;
     this.createdAt = record.createdAt;
+    this.signal = signal ?? new AbortController().signal;
   }
 
   /**

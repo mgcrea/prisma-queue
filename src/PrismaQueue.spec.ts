@@ -55,6 +55,7 @@ describe("PrismaQueue", () => {
         [
           "id",
           "createdAt",
+          "signal",
         ]
       `);
       const record = await job.fetch();
@@ -70,6 +71,7 @@ describe("PrismaQueue", () => {
         [
           "id",
           "createdAt",
+          "signal",
         ]
       `);
       const record = await job.fetch();
@@ -228,6 +230,47 @@ describe("PrismaQueue", () => {
     }, 10000); // Increase timeout for this test
     afterAll(() => {
       void queue.stop();
+    });
+  });
+
+  describe("Job.signal", () => {
+    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    beforeAll(() => {
+      queue = createEmailQueue({ pollInterval: 200 });
+    });
+    beforeEach(async () => {
+      await prisma.queueJob.deleteMany();
+    });
+    afterAll(() => {
+      void queue.stop();
+    });
+    it("should expose a non-aborted signal on dequeued job", async () => {
+      let jobSignal: AbortSignal | undefined;
+      queue.worker = vi.fn(async (job) => {
+        jobSignal = job.signal;
+        return { code: "200" };
+      });
+      await queue.enqueue({ email: "foo@bar.com" });
+      void queue.start();
+      await waitForNextJob(queue);
+      await queue.stop();
+      expect(jobSignal).toBeInstanceOf(AbortSignal);
+      expect(jobSignal!.aborted).toBe(false);
+    });
+    it("should abort signal when queue is stopped", async () => {
+      let jobSignal: AbortSignal | undefined;
+      queue.worker = vi.fn(async (job) => {
+        jobSignal = job.signal;
+        await waitFor(2000);
+        return { code: "200" };
+      });
+      await queue.enqueue({ email: "foo@bar.com" });
+      void queue.start();
+      await waitFor(400);
+      expect(jobSignal).toBeDefined();
+      expect(jobSignal!.aborted).toBe(false);
+      await queue.stop({ timeout: 5000 });
+      expect(jobSignal!.aborted).toBe(true);
     });
   });
 
