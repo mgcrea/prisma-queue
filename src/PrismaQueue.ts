@@ -47,7 +47,8 @@ export type PrismaQueueEvents<T extends JobPayload = JobPayload, U extends JobRe
   enqueue: (job: PrismaJob<T, U>) => void;
   dequeue: (job: PrismaJob<T, U>) => void;
   success: (result: U, job: PrismaJob<T, U>) => void;
-  error: (error: unknown, job?: PrismaJob<T, U>) => void;
+  jobError: (error: unknown, job: PrismaJob<T, U>) => void;
+  error: (error: unknown) => void;
 };
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
@@ -130,14 +131,12 @@ export class PrismaQueue<
       retryStrategy,
     };
 
-    // Default error handler
-    this.on("error", (error, job) => {
-      debug(
-        job
-          ? `Job with id=${job.id} failed for queue named="${this.name}" with error`
-          : `Queue named="${this.name}" encountered an unexpected error`,
-        error,
-      );
+    // Default error handlers
+    this.on("error", (error) => {
+      debug(`Queue named="${this.name}" encountered an unexpected error`, error);
+    });
+    this.on("jobError", (error, job) => {
+      debug(`Job with id=${job.id} failed for queue named="${this.name}" with error`, error);
     });
   }
 
@@ -446,7 +445,7 @@ export class PrismaQueue<
       if (successResult !== undefined) {
         this.emit("success", successResult, job);
       } else if (errorResult !== undefined) {
-        this.emit("error", errorResult, job);
+        this.emit("jobError", errorResult, job);
       }
 
       const { key, cron, payload, finishedAt } = job;

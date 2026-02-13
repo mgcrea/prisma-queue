@@ -519,6 +519,47 @@ describe("PrismaQueue", () => {
     });
   });
 
+  describe("error events", () => {
+    it("should emit jobError for worker failures", async () => {
+      const queue = createEmailQueue({ pollInterval: 200 });
+      await prisma.queueJob.deleteMany();
+      const jobErrors: { error: unknown; jobId: bigint }[] = [];
+      queue.on("jobError", (error, job) => {
+        jobErrors.push({ error, jobId: job.id });
+      });
+      // eslint-disable-next-line @typescript-eslint/require-await
+      queue.worker = vi.fn(async () => {
+        throw new Error("worker failed");
+      });
+      const job = await queue.enqueue({ email: "error@test.com" });
+      void queue.start();
+      await waitForNextJob(queue);
+      await queue.stop();
+      expect(jobErrors.length).toBe(1);
+      expect(jobErrors[0]?.jobId).toBe(job.id);
+      expect(jobErrors[0]?.error).toBeInstanceOf(Error);
+    });
+    it("should not emit error event for worker failures", async () => {
+      const queue = createEmailQueue({ pollInterval: 200 });
+      await prisma.queueJob.deleteMany();
+      const systemErrors: unknown[] = [];
+      // Replace default error handler
+      queue.removeAllListeners("error");
+      queue.on("error", (error) => {
+        systemErrors.push(error);
+      });
+      // eslint-disable-next-line @typescript-eslint/require-await
+      queue.worker = vi.fn(async () => {
+        throw new Error("job failure");
+      });
+      await queue.enqueue({ email: "test@test.com" });
+      void queue.start();
+      await waitForNextJob(queue);
+      await queue.stop();
+      expect(systemErrors.length).toBe(0);
+    });
+  });
+
   describe("Job.isLocked()", () => {
     let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
     beforeAll(() => {
