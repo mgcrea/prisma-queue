@@ -4,17 +4,8 @@ import { Cron } from "croner";
 import { EventEmitter } from "events";
 import assert from "node:assert";
 import { PrismaJob } from "./PrismaJob";
-import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker } from "./types";
-import {
-  AbortError,
-  calculateDelay,
-  debug,
-  escape,
-  getTableName,
-  serializeError,
-  uncapitalize,
-  waitFor,
-} from "./utils";
+import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker, PrismaLightClient } from "./types";
+import { AbortError, calculateDelay, debug, escape, getTableName, serializeError, waitFor } from "./utils";
 
 export type PrismaQueueOptions = {
   prisma?: PrismaClient;
@@ -23,7 +14,6 @@ export type PrismaQueueOptions = {
   maxConcurrency?: number;
   pollInterval?: number;
   jobInterval?: number;
-  modelName?: string;
   tableName?: string;
   deleteOn?: "success" | "failure" | "always" | "never";
   /** Transaction timeout in milliseconds for job processing. Defaults to 30 minutes. */
@@ -72,6 +62,7 @@ export class PrismaQueue<
 > extends EventEmitter {
   #prisma: PrismaClient;
   #escapedTableName: string;
+  #delegateKey: "queueJob";
   private name: string;
   private config: Required<Omit<PrismaQueueOptions, "name" | "prisma">>;
 
@@ -93,8 +84,7 @@ export class PrismaQueue<
     const {
       prisma = new PrismaClient(),
       name = "default",
-      modelName = "QueueJob",
-      tableName = getTableName(modelName),
+      tableName = getTableName("QueueJob"),
       maxAttempts = null,
       maxConcurrency = DEFAULT_MAX_CONCURRENCY,
       pollInterval = DEFAULT_POLL_INTERVAL,
@@ -107,11 +97,14 @@ export class PrismaQueue<
     assert(pollInterval >= 100, "pollInterval must be more than 100 ms");
     assert(jobInterval >= 10, "jobInterval must be more than 10 ms");
 
+    const delegateKey = "queueJob" as const;
+    assert(delegateKey in prisma, `Prisma client does not have a "queueJob" delegate`);
+
     this.name = name;
     this.#prisma = prisma;
     this.#escapedTableName = escape(tableName);
+    this.#delegateKey = delegateKey;
     this.config = {
-      modelName,
       tableName,
       maxAttempts,
       maxConcurrency,
@@ -136,8 +129,14 @@ export class PrismaQueue<
    * Gets the Prisma delegate associated with the queue job model.
    */
   private get model(): Prisma.QueueJobDelegate {
-    const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
-    return this.#prisma[queueJobKey];
+    return this.#prisma[this.#delegateKey];
+  }
+
+  /**
+   * Gets the Prisma delegate from a transaction-scoped client.
+   */
+  private getModel(client: PrismaLightClient): Prisma.QueueJobDelegate {
+    return client[this.#delegateKey];
   }
 
   /**
@@ -206,10 +205,9 @@ export class PrismaQueue<
     debug(`enqueue`, this.name, payloadOrFunction, options);
     const { name: queueName, config } = this;
     const { key = null, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
-    const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
     const now = new Date();
     const record = await this.#prisma.$transaction(async (client) => {
-      const model = client[queueJobKey];
+      const model = this.getModel(client);
       const payload =
         payloadOrFunction instanceof Function ? await payloadOrFunction(client) : payloadOrFunction;
       const data = {
@@ -343,7 +341,6 @@ export class PrismaQueue<
     const { name: queueName } = this;
     const { deleteOn, transactionTimeout } = this.config;
     const tableName = this.#escapedTableName;
-    const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
     const now = new Date();
 
     // Collect deferred events to emit after transaction
@@ -376,7 +373,7 @@ export class PrismaQueue<
         }
         const { id, payload, attempts, maxAttempts } = rows[0];
         const job = new PrismaJob<T, U>(rows[0], {
-          model: client[queueJobKey],
+          model: this.getModel(client),
           client,
           tableName,
         });
