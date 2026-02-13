@@ -293,8 +293,8 @@ export class PrismaQueue<
       `polling queue named="${this.name}" with pollInterval=${pollInterval} maxConcurrency=${maxConcurrency}...`,
     );
 
-    try {
-      while (!this.stopped) {
+    while (!this.stopped) {
+      try {
         // Wait for the queue to be ready
         if (this.concurrency >= maxConcurrency) {
           await waitFor(pollInterval, this.abortController.signal);
@@ -333,12 +333,15 @@ export class PrismaQueue<
 
         // Wait before checking queue again
         await waitFor(jobInterval * 2, this.abortController.signal);
-      }
-    } catch (error) {
-      if (error instanceof AbortError) {
-        debug(`polling for queue named="${this.name}" was aborted`);
-      } else {
-        throw error;
+      } catch (error) {
+        if (error instanceof AbortError) {
+          debug(`polling for queue named="${this.name}" was aborted`);
+          return;
+        }
+        // Emit error and continue polling after a delay
+        this.emit("error", error);
+        // eslint-disable-next-line @typescript-eslint/no-empty-function
+        await waitFor(pollInterval).catch(() => {});
       }
     }
   }
