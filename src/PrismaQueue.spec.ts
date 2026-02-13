@@ -1,8 +1,10 @@
+import type { PrismaClient } from "@prisma/client";
 import type { PrismaQueue } from "src/index";
 import { PrismaJob } from "src/PrismaJob";
 import { debug, serializeError, waitFor } from "src/utils";
 import {
   createEmailQueue,
+  createEmailQueueNonTransactional,
   DEFAULT_POLL_INTERVAL,
   prisma,
   waitForNextEvent,
@@ -854,6 +856,216 @@ describe("PrismaQueue", () => {
 
     afterAll(async () => {
       await queue.stop();
+    });
+  });
+});
+
+describe("PrismaQueue (transactional: false)", () => {
+  describe("dequeue", () => {
+    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    beforeAll(() => {
+      queue = createEmailQueueNonTransactional();
+    });
+    beforeEach(async () => {
+      await prisma.queueJob.deleteMany();
+      void queue.start();
+    });
+    afterEach(() => {
+      void queue.stop();
+    });
+    it("should properly dequeue a successful job", async () => {
+      queue.worker = vi.fn(async (_job, _client) => {
+        await waitFor(200);
+        return { code: "200" };
+      });
+      const job = await queue.enqueue({ email: "foo@bar.com" });
+      await waitForNextJob(queue);
+      expect(queue.worker).toHaveBeenCalledTimes(1);
+      const record = await job.fetch();
+      expect(record.finishedAt).toBeInstanceOf(Date);
+    });
+    it("should properly dequeue a failed job", async () => {
+      let error: Error | null = null;
+      // eslint-disable-next-line @typescript-eslint/require-await
+      queue.worker = vi.fn(async (_job) => {
+        error = new Error("failed");
+        throw error;
+      });
+      const job = await queue.enqueue({ email: "foo@bar.com" });
+      await waitForNextJob(queue);
+      expect(queue.worker).toHaveBeenCalledTimes(1);
+      const record = await job.fetch();
+      expect(record.finishedAt).toBeNull();
+      expect(record.error).toEqual(serializeError(error));
+    });
+    it("should provide PrismaClient with $transaction to worker", async () => {
+      let clientHasTransaction = false;
+      // eslint-disable-next-line @typescript-eslint/require-await
+      queue.worker = vi.fn(async (_job: EmailJob, client: PrismaClient) => {
+        clientHasTransaction = typeof client.$transaction === "function";
+        return { code: "200" };
+      });
+      await queue.enqueue({ email: "foo@bar.com" });
+      await waitForNextJob(queue);
+      expect(clientHasTransaction).toBe(true);
+    });
+    it("should reset processedAt on retry", async () => {
+      const retryQueue = createEmailQueueNonTransactional({
+        maxAttempts: 3,
+        pollInterval: 200,
+        retryStrategy: ({ attempts, maxAttempts }) => {
+          if (maxAttempts !== null && attempts >= maxAttempts) return null;
+          return 100 * attempts;
+        },
+      });
+      await prisma.queueJob.deleteMany();
+      // eslint-disable-next-line @typescript-eslint/require-await
+      retryQueue.worker = vi.fn(async () => {
+        throw new Error("always fails");
+      });
+      const job = await retryQueue.enqueue({ email: "retry@test.com" });
+      void retryQueue.start();
+      // Wait for first dequeue
+      await waitForNextJob(retryQueue);
+      // After first failure, processedAt should be reset
+      const record = await job.fetch();
+      expect(record.processedAt).toBeNull();
+      expect(record.finishedAt).toBeNull();
+      // Wait for remaining retries
+      await waitForNthJob(retryQueue, 2);
+      await retryQueue.stop();
+      expect(retryQueue.worker).toHaveBeenCalledTimes(3);
+      // After max attempts, job should be finished
+      const finalRecord = await job.fetch();
+      expect(finalRecord.finishedAt).toBeInstanceOf(Date);
+    });
+    it("should work with deleteOn: success", async () => {
+      const deleteQueue = createEmailQueueNonTransactional({ deleteOn: "success" });
+      await prisma.queueJob.deleteMany();
+      // eslint-disable-next-line @typescript-eslint/require-await
+      deleteQueue.worker = vi.fn(async () => {
+        return { code: "200" };
+      });
+      const job = await deleteQueue.enqueue({ email: "foo@bar.com" });
+      void deleteQueue.start();
+      await waitForNextJob(deleteQueue);
+      await deleteQueue.stop();
+      const record = await job.fetch();
+      expect(record).toBeNull();
+    });
+    it("should properly update job progress", async () => {
+      queue.worker = vi.fn(async (job: EmailJob) => {
+        await job.progress(50);
+        throw new Error("failed");
+      });
+      const job = await queue.enqueue({ email: "foo@bar.com" });
+      void queue.start();
+      await waitForNextJob(queue);
+      const record = await job.fetch();
+      expect(record.progress).toBe(50);
+    });
+    it("should properly re-enqueue a recurring cron job", async () => {
+      // eslint-disable-next-line @typescript-eslint/require-await
+      queue.worker = vi.fn(async () => {
+        return { code: "200" };
+      });
+      await queue.schedule(
+        { key: "nt-email-schedule", cron: "5 5 * * *", runAt: new Date() },
+        { email: "foo@bar.com" },
+      );
+      void queue.start();
+      await waitForNextEvent(queue, "enqueue");
+      const jobs = await prisma.queueJob.findMany({ where: { key: "nt-email-schedule" } });
+      expect(jobs.length).toBe(2);
+      const nextJob = jobs[1];
+      expect(nextJob?.runAt.getHours()).toBe(5);
+      expect(nextJob?.runAt.getMinutes()).toBe(5);
+    });
+    afterAll(() => {
+      void queue.stop();
+    });
+  });
+
+  describe("requeueStale", () => {
+    const STALE_QUEUE_NAME = "stale-test-queue";
+    it("should recover stuck jobs", async () => {
+      const queue = createEmailQueueNonTransactional({ pollInterval: 200, name: STALE_QUEUE_NAME });
+      await prisma.queueJob.deleteMany();
+      // Simulate a stuck job: processedAt set, finishedAt null
+      const staleDate = new Date(Date.now() - 60_000); // 60 seconds ago
+      await prisma.queueJob.create({
+        data: {
+          queue: STALE_QUEUE_NAME,
+          payload: { email: "stuck@test.com" },
+          processedAt: staleDate,
+          attempts: 1,
+          runAt: staleDate,
+        },
+      });
+      // Verify it's not available for dequeue
+      const sizeBefore = await queue.size(true);
+      expect(sizeBefore).toBe(0);
+      // Requeue stale jobs older than 30s
+      const count = await queue.requeueStale({ olderThanMs: 30_000 });
+      expect(count).toBe(1);
+      // Now it should be available
+      const sizeAfter = await queue.size(true);
+      expect(sizeAfter).toBe(1);
+    });
+    it("should not requeue recently claimed jobs", async () => {
+      const queue = createEmailQueueNonTransactional({ pollInterval: 200, name: STALE_QUEUE_NAME });
+      await prisma.queueJob.deleteMany();
+      // Simulate a recently claimed job
+      await prisma.queueJob.create({
+        data: {
+          queue: STALE_QUEUE_NAME,
+          payload: { email: "recent@test.com" },
+          processedAt: new Date(), // just now
+          attempts: 1,
+          runAt: new Date(),
+        },
+      });
+      const count = await queue.requeueStale({ olderThanMs: 30_000 });
+      expect(count).toBe(0);
+    });
+  });
+
+  describe("rolling upgrade safety", () => {
+    const UPGRADE_QUEUE_NAME = "upgrade-test-queue";
+    it("should not pick up rows with non-null processedAt", async () => {
+      const queue = createEmailQueueNonTransactional({ pollInterval: 100, name: UPGRADE_QUEUE_NAME });
+      await prisma.queueJob.deleteMany();
+      // eslint-disable-next-line @typescript-eslint/require-await
+      queue.worker = vi.fn(async () => {
+        return { code: "200" };
+      });
+      // Simulate an old in-flight row (from before the processedAt guard)
+      await prisma.queueJob.create({
+        data: {
+          queue: UPGRADE_QUEUE_NAME,
+          payload: { email: "old@test.com" },
+          processedAt: new Date(Date.now() - 120_000),
+          attempts: 1,
+          runAt: new Date(Date.now() - 120_000),
+        },
+      });
+      // Also add a normal job
+      await queue.enqueue({ email: "new@test.com" });
+      void queue.start();
+      await waitForNextJob(queue);
+      await queue.stop();
+      // Only the new job should have been processed
+      expect(queue.worker).toHaveBeenCalledTimes(1);
+      expect(queue.worker).toHaveBeenCalledWith(
+        expect.objectContaining({ payload: { email: "new@test.com" } }),
+        expect.any(Object),
+      );
+      // The old stale row should still be there, untouched
+      const staleJobs = await prisma.queueJob.findMany({
+        where: { payload: { equals: { email: "old@test.com" } } },
+      });
+      expect(staleJobs.length).toBe(1);
+      expect(staleJobs[0]?.finishedAt).toBeNull();
     });
   });
 });
