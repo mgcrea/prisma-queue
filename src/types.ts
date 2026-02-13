@@ -15,6 +15,11 @@ export type JobWorker<T extends JobPayload = JobPayload, U extends JobResult = J
   client: PrismaLightClient,
 ) => Promise<U>;
 
+export type JobWorkerWithClient<T extends JobPayload = JobPayload, U extends JobResult = JobResult> = (
+  job: PrismaJob<T, U>,
+  client: PrismaClient,
+) => Promise<U>;
+
 export type PrismaLightClient = Omit<
   PrismaClient,
   "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
