@@ -10,6 +10,7 @@ import type {
   JobPayload,
   JobResult,
   JobWorker,
+  JobWorkerWithClient,
   PrismaLightClient,
   RetryStrategy,
 } from "./types";
@@ -28,6 +29,8 @@ export type PrismaQueueOptions = {
   transactionTimeout?: number;
   /** Custom retry strategy. Returns delay in ms, or null to stop retrying. */
   retryStrategy?: RetryStrategy;
+  /** Whether to run the worker inside the dequeue transaction. Defaults to true. */
+  transactional?: boolean;
 };
 
 export type EnqueueOptions = {
@@ -87,12 +90,13 @@ export class PrismaQueue<
 
   /**
    * Constructs a PrismaQueue object with specified options and a worker function.
+   * Use the `createQueue` factory function for type-safe overloads based on the `transactional` option.
    * @param options - Configuration options for the queue.
    * @param worker - The worker function that processes jobs.
    */
   public constructor(
     private options: PrismaQueueOptions = {},
-    public worker: JobWorker<T, U>,
+    public worker: JobWorker<T, U> | JobWorkerWithClient<T, U>,
   ) {
     super();
 
@@ -107,6 +111,7 @@ export class PrismaQueue<
       deleteOn = DEFAULT_DELETE_ON,
       transactionTimeout = 30 * 60 * 1000,
       retryStrategy = defaultRetryStrategy,
+      transactional = true,
     } = this.options;
 
     assert(name.length <= 255, "name must be less or equal to 255 chars");
@@ -129,6 +134,7 @@ export class PrismaQueue<
       deleteOn,
       transactionTimeout,
       retryStrategy,
+      transactional,
     };
 
     // Default error handlers
@@ -345,7 +351,8 @@ export class PrismaQueue<
   }
 
   /**
-   * Dequeues and processes the next job in the queue. Handles locking and error management internally.
+   * Dequeues and processes the next job in the queue. Dispatches to transactional or
+   * non-transactional path based on configuration, then emits events and handles cron scheduling.
    * @returns {Promise<PrismaJob<T, U> | null>} The job that was processed or null if no job was available.
    */
   private async dequeue(): Promise<PrismaJob<T, U> | null> {
@@ -353,12 +360,48 @@ export class PrismaQueue<
       return null;
     }
     debug(`dequeuing from queue named="${this.name}"...`);
+
+    const { job, successResult, errorResult } = this.config.transactional
+      ? await this.dequeueTransactional()
+      : await this.dequeueNonTransactional();
+
+    if (job) {
+      // Emit events in logical order: dequeue first, then success/error
+      this.emit("dequeue", job);
+      if (successResult !== undefined) {
+        this.emit("success", successResult, job);
+      } else if (errorResult !== undefined) {
+        this.emit("jobError", errorResult, job);
+      }
+
+      const { key, cron, payload, finishedAt } = job;
+      if (finishedAt && cron && key) {
+        // Schedule next cron
+        debug(
+          `scheduling next cron job({key: ${key}, cron: ${cron}}) with payload=${JSON.stringify(payload)}`,
+        );
+        try {
+          await this.schedule({ key, cron }, payload);
+        } catch (scheduleError) {
+          this.emit("error", scheduleError);
+        }
+      }
+    }
+
+    return job;
+  }
+
+  private async dequeueTransactional(): Promise<{
+    job: PrismaJob<T, U> | null;
+    successResult: U | undefined;
+    errorResult: unknown;
+  }> {
     const { name: queueName } = this;
     const { deleteOn, transactionTimeout } = this.config;
     const tableName = this.#escapedTableName;
     const now = new Date();
+    const worker = this.worker as JobWorker<T, U>;
 
-    // Collect deferred events to emit after transaction
     let successResult: U | undefined;
     let errorResult: unknown;
 
@@ -384,7 +427,6 @@ export class PrismaQueue<
         );
         if (!rows.length || !rows[0]) {
           debug(`no jobs found in queue named="${this.name}"`);
-          // @NOTE Failed to acquire a lock
           return null;
         }
         const { id, payload, attempts, maxAttempts } = rows[0];
@@ -397,7 +439,7 @@ export class PrismaQueue<
         let result;
         try {
           debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
-          result = await this.worker(job, client);
+          result = await worker(job, client);
           debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
           const date = new Date();
           await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });
@@ -441,30 +483,121 @@ export class PrismaQueue<
       { timeout: transactionTimeout },
     );
 
-    if (job) {
-      // Emit events in logical order: dequeue first, then success/error
-      this.emit("dequeue", job);
-      if (successResult !== undefined) {
-        this.emit("success", successResult, job);
-      } else if (errorResult !== undefined) {
-        this.emit("jobError", errorResult, job);
-      }
+    return { job, successResult, errorResult };
+  }
 
-      const { key, cron, payload, finishedAt } = job;
-      if (finishedAt && cron && key) {
-        // Schedule next cron
-        debug(
-          `scheduling next cron job({key: ${key}, cron: ${cron}}) with payload=${JSON.stringify(payload)}`,
-        );
-        try {
-          await this.schedule({ key, cron }, payload);
-        } catch (scheduleError) {
-          this.emit("error", scheduleError);
-        }
+  private async dequeueNonTransactional(): Promise<{
+    job: PrismaJob<T, U> | null;
+    successResult: U | undefined;
+    errorResult: unknown;
+  }> {
+    const { name: queueName } = this;
+    const { deleteOn } = this.config;
+    const tableName = this.#escapedTableName;
+    const now = new Date();
+    const worker = this.worker as JobWorkerWithClient<T, U>;
+
+    let successResult: U | undefined;
+    let errorResult: unknown;
+
+    // Phase 1: Claim the job atomically (single-statement implicit transaction)
+    const rows = await this.#prisma.$queryRawUnsafe<DatabaseJob<T, U>[]>(
+      `UPDATE ${tableName} SET "processedAt" = $2, "attempts" = "attempts" + 1
+       WHERE id = (
+         SELECT id
+         FROM ${tableName}
+         WHERE (${tableName}."queue" = $1)
+           AND (${tableName}."finishedAt" IS NULL)
+           AND (${tableName}."processedAt" IS NULL)
+           AND (${tableName}."runAt" <= $2)
+           AND (${tableName}."notBefore" IS NULL OR ${tableName}."notBefore" <= $2)
+         ORDER BY ${tableName}."priority" ASC, ${tableName}."runAt" ASC
+         FOR UPDATE SKIP LOCKED
+         LIMIT 1
+       )
+       RETURNING *;`,
+      queueName,
+      now,
+    );
+
+    if (!rows.length || !rows[0]) {
+      debug(`no jobs found in queue named="${this.name}"`);
+      return { job: null, successResult: undefined, errorResult: undefined };
+    }
+
+    const { id, payload, attempts, maxAttempts } = rows[0];
+    const job = new PrismaJob<T, U>(rows[0], {
+      model: this.model,
+      client: this.#prisma,
+      tableName,
+      signal: this.abortController.signal,
+    });
+
+    // Phase 2: Run worker outside any transaction
+    try {
+      debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
+      const result = await worker(job, this.#prisma);
+      debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
+
+      // Phase 3a: Update success
+      const date = new Date();
+      await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });
+      successResult = result;
+      if (deleteOn === "success" || deleteOn === "always") {
+        await job.delete();
+      }
+    } catch (error) {
+      // Phase 3b: Update error/retry
+      const date = new Date();
+      debug(
+        `failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${String(error)}"`,
+      );
+      const delay = this.config.retryStrategy({ attempts, maxAttempts, error });
+      const isFinished = delay === null;
+      if (!isFinished) {
+        const notBefore = new Date(date.getTime() + delay);
+        debug(`will retry at notBefore=${notBefore.toISOString()} (attempts=${attempts})`);
+        await job.update({
+          processedAt: null,
+          finishedAt: null,
+          failedAt: date,
+          error: serializeError(error),
+          notBefore,
+        });
+      } else {
+        await job.update({
+          finishedAt: date,
+          failedAt: date,
+          error: serializeError(error),
+          notBefore: null,
+        });
+      }
+      errorResult = error;
+      if (deleteOn === "failure" || deleteOn === "always") {
+        await job.delete();
       }
     }
 
-    return job;
+    return { job, successResult, errorResult };
+  }
+
+  /**
+   * Requeues stale jobs that were claimed but never completed (e.g., due to a process crash
+   * in non-transactional mode). Resets `processedAt` to null for jobs older than the cutoff.
+   * @param options.olderThanMs - Only requeue jobs claimed more than this many milliseconds ago.
+   * @returns The number of jobs requeued.
+   */
+  public async requeueStale(options: { olderThanMs: number }): Promise<number> {
+    const cutoff = new Date(Date.now() - options.olderThanMs);
+    const { count } = await this.model.updateMany({
+      where: {
+        queue: this.name,
+        processedAt: { lte: cutoff },
+        finishedAt: null,
+      },
+      data: { processedAt: null },
+    });
+    return count;
   }
 
   /**
