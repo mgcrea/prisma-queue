@@ -44,7 +44,7 @@
     "with-env": "dotenv -e ./.env --"
   },
   "dependencies": {
-    "croner": "^9.1.0",
+    "croner": "^10.0.1",
     "debug": "^4.4.3"
   },
   "peerDependencies": {
@@ -60,7 +60,7 @@
     "@types/node": "^25.2.3",
     "@vitest/coverage-v8": "^4.0.18",
     "dotenv-cli": "^11.0.0",
-    "eslint": "^9.39.2",
+    "eslint": "^10.0.0",
     "prettier": "^3.8.1",
     "prettier-plugin-organize-imports": "^4.3.0",
     "prisma": "^7.4.0",
