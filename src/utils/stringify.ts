@@ -1,7 +1,8 @@
-import type { Prisma } from "@prisma/client";
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
+import type { JsonObject, JsonValue } from "../types";
 
-type InputJsonValue = Prisma.InputJsonValue;
-type InputJsonObject = Prisma.InputJsonObject;
+type InputJsonValue = JsonValue;
+type InputJsonObject = JsonObject;
 
 export function prepareForJson<T>(originalValue: T): InputJsonValue {
   if (typeof originalValue === "undefined") {

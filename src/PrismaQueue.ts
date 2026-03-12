@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Cron } from "croner";
 import { EventEmitter } from "events";
 import assert from "node:assert";
@@ -10,13 +10,13 @@ import type {
   JobResult,
   JobWorker,
   JobWorkerWithClient,
-  PrismaLightClient,
   RetryStrategy,
+  TransactionClient,
 } from "./types";
-import { AbortError, calculateDelay, debug, escape, getTableName, serializeError, waitFor } from "./utils";
+import { AbortError, calculateDelay, debug, escape, serializeError, waitFor } from "./utils";
 
-export type PrismaQueueOptions = {
-  prisma?: PrismaClient;
+export type PrismaQueueOptions<C = unknown> = {
+  prisma: C;
   name?: string;
   maxAttempts?: number | null;
   maxConcurrency?: number;
@@ -53,7 +53,12 @@ export type PrismaQueueEvents<T extends JobPayload = JobPayload, U extends JobRe
   error: (error: unknown) => void;
 };
 
-export interface PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult = JobResult> {
+export interface PrismaQueue<
+  T extends JobPayload = JobPayload,
+  U extends JobResult = JobResult,
+  // oxlint-disable-next-line no-unused-vars
+  C = unknown,
+> {
   on<E extends keyof PrismaQueueEvents<T, U>>(event: E, listener: PrismaQueueEvents<T, U>[E]): this;
   once<E extends keyof PrismaQueueEvents<T, U>>(event: E, listener: PrismaQueueEvents<T, U>[E]): this;
   emit<E extends keyof PrismaQueueEvents<T, U>>(
@@ -71,15 +76,17 @@ const defaultRetryStrategy: RetryStrategy = ({ attempts, maxAttempts }) => {
   return calculateDelay(attempts);
 };
 
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class PrismaQueue<
   T extends JobPayload = JobPayload,
   U extends JobResult = JobResult,
+  C = unknown,
 > extends EventEmitter {
-  #prisma: PrismaClient;
+  #prisma: C;
   #escapedTableName: string;
   #delegateKey: "queueJob";
   private name: string;
-  private config: Required<Omit<PrismaQueueOptions, "name" | "prisma">>;
+  private config: Required<Omit<PrismaQueueOptions<C>, "name" | "prisma">>;
 
   private concurrency = 0;
   private stopped = true;
@@ -92,15 +99,15 @@ export class PrismaQueue<
    * @param worker - The worker function that processes jobs.
    */
   public constructor(
-    private options: PrismaQueueOptions = {},
-    public worker: JobWorker<T, U> | JobWorkerWithClient<T, U>,
+    private options: PrismaQueueOptions<C>,
+    public worker: JobWorker<T, U, C> | JobWorkerWithClient<T, U, C>,
   ) {
     super();
 
     const {
-      prisma = new PrismaClient(),
+      prisma,
       name = "default",
-      tableName = getTableName("QueueJob"),
+      tableName = "queue_jobs",
       maxAttempts = null,
       maxConcurrency = DEFAULT_MAX_CONCURRENCY,
       pollInterval = DEFAULT_POLL_INTERVAL,
@@ -111,12 +118,13 @@ export class PrismaQueue<
       transactional = true,
     } = this.options;
 
+    assert(prisma && typeof prisma === "object", "prisma option is required");
     assert(name.length <= 255, "name must be less or equal to 255 chars");
     assert(pollInterval >= 100, "pollInterval must be more than 100 ms");
     assert(jobInterval >= 10, "jobInterval must be more than 10 ms");
 
     const delegateKey = "queueJob" as const;
-    assert(delegateKey in prisma, `Prisma client does not have a "queueJob" delegate`);
+    assert(delegateKey in (prisma as object), `Prisma client does not have a "queueJob" delegate`);
 
     this.name = name;
     this.#prisma = prisma;
@@ -146,15 +154,17 @@ export class PrismaQueue<
   /**
    * Gets the Prisma delegate associated with the queue job model.
    */
-  private get model(): Prisma.QueueJobDelegate {
-    return this.#prisma[this.#delegateKey];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get model(): any {
+    return (this.#prisma as any)[this.#delegateKey];
   }
 
   /**
    * Gets the Prisma delegate from a transaction-scoped client.
    */
-  private getModel(client: PrismaLightClient): Prisma.QueueJobDelegate {
-    return client[this.#delegateKey];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private getModel(client: unknown): any {
+    return (client as any)[this.#delegateKey];
   }
 
   /**
@@ -207,7 +217,7 @@ export class PrismaQueue<
    * @param options - Options for the job, such as scheduling and attempts.
    */
   public add = (
-    payloadOrFunction: T | JobCreator<T>,
+    payloadOrFunction: T | JobCreator<T, C>,
     options: EnqueueOptions = {},
   ): Promise<PrismaJob<T, U>> => this.enqueue(payloadOrFunction, options);
 
@@ -217,14 +227,14 @@ export class PrismaQueue<
    * @param options - Options for the job, such as scheduling and attempts.
    */
   public async enqueue(
-    payloadOrFunction: T | JobCreator<T>,
+    payloadOrFunction: T | JobCreator<T, C>,
     options: EnqueueOptions = {},
   ): Promise<PrismaJob<T, U>> {
     debug(`enqueue`, this.name, payloadOrFunction, options);
     const { name: queueName, config } = this;
     const { key = null, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
     const now = new Date();
-    const record = await this.#prisma.$transaction(async (client) => {
+    const record = await (this.#prisma as any).$transaction(async (client: TransactionClient<C>) => {
       const model = this.getModel(client);
       const payload =
         payloadOrFunction instanceof Function ? await payloadOrFunction(client) : payloadOrFunction;
@@ -276,7 +286,7 @@ export class PrismaQueue<
    */
   public async schedule(
     options: ScheduleOptions,
-    payloadOrFunction: T | JobCreator<T>,
+    payloadOrFunction: T | JobCreator<T, C>,
   ): Promise<PrismaJob<T, U>> {
     debug(`schedule`, this.name, options, payloadOrFunction);
     const { key, cron, runAt: firstRunAt, ...otherOptions } = options;
@@ -341,6 +351,7 @@ export class PrismaQueue<
         }
         // Emit error and continue polling after a delay
         this.emit("error", error);
+        // eslint-disable-next-line @typescript-eslint/no-empty-function
         await waitFor(pollInterval, this.abortController.signal).catch(() => {});
       }
     }
@@ -396,14 +407,14 @@ export class PrismaQueue<
     const { deleteOn, transactionTimeout } = this.config;
     const tableName = this.#escapedTableName;
     const now = new Date();
-    const worker = this.worker as JobWorker<T, U>;
+    const worker = this.worker as JobWorker<T, U, C>;
 
     let successResult: U | undefined;
     let errorResult: unknown;
 
-    const job = await this.#prisma.$transaction(
-      async (client) => {
-        const rows = await client.$queryRawUnsafe<DatabaseJob<T, U>[]>(
+    const job = await (this.#prisma as any).$transaction(
+      async (client: TransactionClient<C>) => {
+        const rows: DatabaseJob<T, U>[] = await (client as any).$queryRawUnsafe(
           `UPDATE ${tableName} SET "processedAt" = $2, "attempts" = "attempts" + 1
            WHERE id = (
              SELECT id
@@ -438,7 +449,7 @@ export class PrismaQueue<
           result = await worker(job, client);
           debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
           const date = new Date();
-          await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });
+          await job.update({ finishedAt: date, progress: 100, result, error: null });
           successResult = result;
           if (deleteOn === "success" || deleteOn === "always") {
             await job.delete();
@@ -491,13 +502,13 @@ export class PrismaQueue<
     const { deleteOn } = this.config;
     const tableName = this.#escapedTableName;
     const now = new Date();
-    const worker = this.worker as JobWorkerWithClient<T, U>;
+    const worker = this.worker as JobWorkerWithClient<T, U, C>;
 
     let successResult: U | undefined;
     let errorResult: unknown;
 
     // Phase 1: Claim the job atomically (single-statement implicit transaction)
-    const rows = await this.#prisma.$queryRawUnsafe<DatabaseJob<T, U>[]>(
+    const rows: DatabaseJob<T, U>[] = await (this.#prisma as any).$queryRawUnsafe(
       `UPDATE ${tableName} SET "processedAt" = $2, "attempts" = "attempts" + 1
        WHERE id = (
          SELECT id
@@ -537,7 +548,7 @@ export class PrismaQueue<
 
       // Phase 3a: Update success
       const date = new Date();
-      await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });
+      await job.update({ finishedAt: date, progress: 100, result, error: null });
       successResult = result;
       if (deleteOn === "success" || deleteOn === "always") {
         await job.delete();
@@ -607,11 +618,11 @@ export class PrismaQueue<
   public async size(onlyAvailable?: boolean): Promise<number> {
     const { name: queueName } = this;
     const date = new Date();
-    const where: Prisma.QueueJobWhereInput = { queue: queueName, finishedAt: null };
+    const where: Record<string, unknown> = { queue: queueName, finishedAt: null };
     if (onlyAvailable) {
-      where.runAt = { lte: date };
-      where.processedAt = null;
-      where.AND = { OR: [{ notBefore: { lte: date } }, { notBefore: null }] };
+      where["runAt"] = { lte: date };
+      where["processedAt"] = null;
+      where["AND"] = { OR: [{ notBefore: { lte: date } }, { notBefore: null }] };
     }
     return await this.model.count({
       where,

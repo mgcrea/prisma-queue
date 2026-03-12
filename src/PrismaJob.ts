@@ -1,11 +1,9 @@
-import type { Prisma } from "@prisma/client";
-import type { DatabaseJob, PrismaLightClient } from "./types";
+import type { DatabaseJob } from "./types";
 import { isPrismaError } from "./utils";
-// import { debug } from "./utils";
 
 export type PrismaJobOptions = {
-  model: Prisma.QueueJobDelegate;
-  client: PrismaLightClient;
+  model: any;
+  client: any;
   tableName: string;
   signal?: AbortSignal;
 };
@@ -14,8 +12,8 @@ export type PrismaJobOptions = {
  * Represents a job within a Prisma-managed queue.
  */
 export class PrismaJob<Payload, Result> {
-  #model: Prisma.QueueJobDelegate;
-  #client: PrismaLightClient;
+  #model: any;
+  #client: any;
   #tableName: string;
   #record: DatabaseJob<Payload, Result>;
 
@@ -128,7 +126,7 @@ export class PrismaJob<Payload, Result> {
    * Updates the job record in the database with new data.
    * @param data - The new data to be merged with the existing job record.
    */
-  public async update(data: Prisma.QueueJobUpdateInput): Promise<DatabaseJob<Payload, Result>> {
+  public async update(data: Record<string, unknown>): Promise<DatabaseJob<Payload, Result>> {
     const record = (await this.#model.update({
       where: { id: this.id },
       data,
@@ -163,9 +161,11 @@ export class PrismaJob<Payload, Result> {
       return false;
     } catch (error) {
       // Handle specific error types that indicate lock contention
-      if (isPrismaError(error) && error.meta?.["code"] === "55P03") {
-        // PostgreSQL's lock_not_available
-        return true;
+      // PostgreSQL's lock_not_available (55P03) may appear in meta.code or in the message
+      if (isPrismaError(error)) {
+        if (error.meta?.["code"] === "55P03" || error.message.includes("55P03")) {
+          return true;
+        }
       }
       // Re-throw other unexpected errors
       throw error;

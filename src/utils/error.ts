@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+type PrismaKnownError = Error & { code: string; clientVersion: string; meta?: Record<string, unknown> };
 
 export const serializeError = (err: unknown) => {
   if (err instanceof Error) {
@@ -15,6 +15,6 @@ export const serializeError = (err: unknown) => {
   };
 };
 
-export const isPrismaError = (error: unknown): error is Prisma.PrismaClientKnownRequestError => {
+export const isPrismaError = (error: unknown): error is PrismaKnownError => {
   return error instanceof Error && "code" in error && "clientVersion" in error && "meta" in error;
 };
