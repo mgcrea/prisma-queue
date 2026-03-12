@@ -11,7 +11,6 @@ let globalQueueIndex = 0;
 
 export const createEmailQueue = (
   options: PrismaQueueOptions = {},
-  // eslint-disable-next-line @typescript-eslint/require-await
   worker: JobWorker<EmailJobPayload, EmailJobResult> = async (_job) => {
     return { code: "200" };
   },
@@ -35,7 +34,6 @@ export const createEmailQueue = (
 
 export const createEmailQueueNonTransactional = (
   options: Omit<PrismaQueueOptions, "transactional"> = {},
-  // eslint-disable-next-line @typescript-eslint/require-await
   worker: JobWorkerWithClient<EmailJobPayload, EmailJobResult> = async (_job, _client) => {
     return { code: "200" };
   },

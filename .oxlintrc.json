@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "vitest", "import", "unicorn"],
+  "rules": {
+    "@typescript-eslint/no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "@typescript-eslint/no-unsafe-declaration-merging": "off"
+  },
+  "overrides": [
+    {
+      "files": ["*.spec.ts", "*.test.ts", "*.mock.ts"],
+      "rules": {
+        "@typescript-eslint/no-unsafe-assignment": "off"
+      }
+    }
+  ]
+}

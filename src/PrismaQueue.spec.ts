@@ -162,7 +162,6 @@ describe("PrismaQueue", () => {
     });
     it("should properly dequeue a failed job", async () => {
       let error: Error | null = null;
-      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async (_job) => {
         error = new Error("failed");
         throw error;
@@ -248,7 +247,6 @@ describe("PrismaQueue", () => {
     });
     it("should expose a non-aborted signal on dequeued job", async () => {
       let signalAbortedDuringWork: boolean | undefined;
-      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async (job: EmailJob) => {
         signalAbortedDuringWork = job.signal.aborted;
         return { code: "200" };
@@ -290,7 +288,6 @@ describe("PrismaQueue", () => {
         },
       });
       await prisma.queueJob.deleteMany();
-      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async () => {
         throw new Error("always fails");
       });
@@ -307,7 +304,6 @@ describe("PrismaQueue", () => {
         retryStrategy: () => null,
       });
       await prisma.queueJob.deleteMany();
-      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async () => {
         throw new Error("fails once");
       });
@@ -335,7 +331,6 @@ describe("PrismaQueue", () => {
         void queue.stop();
       });
       it("should properly dequeue a successful job", async () => {
-        // eslint-disable-next-line @typescript-eslint/require-await
         queue.worker = vi.fn(async (_job) => {
           return { code: "200" };
         });
@@ -362,7 +357,6 @@ describe("PrismaQueue", () => {
       });
       it("should properly dequeue a failed job", async () => {
         let error: Error | null = null;
-        // eslint-disable-next-line @typescript-eslint/require-await
         queue.worker = vi.fn(async (_job) => {
           error = new Error("failed");
           throw error;
@@ -389,7 +383,6 @@ describe("PrismaQueue", () => {
         void queue.stop();
       });
       it("should properly dequeue a successful job", async () => {
-        // eslint-disable-next-line @typescript-eslint/require-await
         queue.worker = vi.fn(async (_job) => {
           return { code: "200" };
         });
@@ -401,7 +394,6 @@ describe("PrismaQueue", () => {
       });
       it("should properly dequeue a failed job", async () => {
         let error: Error | null = null;
-        // eslint-disable-next-line @typescript-eslint/require-await
         queue.worker = vi.fn(async (_job) => {
           error = new Error("failed");
           throw error;
@@ -462,7 +454,6 @@ describe("PrismaQueue", () => {
       void queue.stop();
     });
     it("should properly prioritize a job with a lower priority", async () => {
-      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async (_job) => {
         return { code: "200" };
       });
@@ -528,7 +519,6 @@ describe("PrismaQueue", () => {
       queue.on("jobError", (error, job) => {
         jobErrors.push({ error, jobId: job.id });
       });
-      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async () => {
         throw new Error("worker failed");
       });
@@ -549,7 +539,6 @@ describe("PrismaQueue", () => {
       queue.on("error", (error) => {
         systemErrors.push(error);
       });
-      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async () => {
         throw new Error("job failure");
       });
@@ -659,7 +648,6 @@ describe("PrismaQueue", () => {
 
     it("should process jobs in priority order", async () => {
       const processedEmails: string[] = [];
-      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async (job: EmailJob) => {
         processedEmails.push(job.payload.email);
         return { code: "200" };
@@ -886,7 +874,6 @@ describe("PrismaQueue (transactional: false)", () => {
     });
     it("should properly dequeue a failed job", async () => {
       let error: Error | null = null;
-      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async (_job) => {
         error = new Error("failed");
         throw error;
@@ -900,7 +887,6 @@ describe("PrismaQueue (transactional: false)", () => {
     });
     it("should provide PrismaClient with $transaction to worker", async () => {
       let clientHasTransaction = false;
-      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async (_job: EmailJob, client: PrismaClient) => {
         clientHasTransaction = typeof client.$transaction === "function";
         return { code: "200" };
@@ -919,7 +905,6 @@ describe("PrismaQueue (transactional: false)", () => {
         },
       });
       await prisma.queueJob.deleteMany();
-      // eslint-disable-next-line @typescript-eslint/require-await
       retryQueue.worker = vi.fn(async () => {
         throw new Error("always fails");
       });
@@ -942,7 +927,6 @@ describe("PrismaQueue (transactional: false)", () => {
     it("should work with deleteOn: success", async () => {
       const deleteQueue = createEmailQueueNonTransactional({ deleteOn: "success" });
       await prisma.queueJob.deleteMany();
-      // eslint-disable-next-line @typescript-eslint/require-await
       deleteQueue.worker = vi.fn(async () => {
         return { code: "200" };
       });
@@ -965,7 +949,6 @@ describe("PrismaQueue (transactional: false)", () => {
       expect(record.progress).toBe(50);
     });
     it("should properly re-enqueue a recurring cron job", async () => {
-      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async () => {
         return { code: "200" };
       });
@@ -1035,7 +1018,6 @@ describe("PrismaQueue (transactional: false)", () => {
     it("should not pick up rows with non-null processedAt", async () => {
       const queue = createEmailQueueNonTransactional({ pollInterval: 100, name: UPGRADE_QUEUE_NAME });
       await prisma.queueJob.deleteMany();
-      // eslint-disable-next-line @typescript-eslint/require-await
       queue.worker = vi.fn(async () => {
         return { code: "200" };
       });

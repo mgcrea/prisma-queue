@@ -1,6 +1,6 @@
 {
   "name": "@mgcrea/prisma-queue",
-  "version": "1.14.1",
+  "version": "1.14.0",
   "author": "Olivier Louvignes <olivier@mgcrea.io>",
   "repository": "github:mgcrea/fastify-session-prisma-store",
   "license": "MIT",
@@ -30,9 +30,9 @@
   "scripts": {
     "start": "DEBUG=prisma-queue,prisma-query vitest",
     "build": "tsup",
-    "lint": "eslint src/ test/",
-    "prettycheck": "prettier --check src/ test/",
-    "format": "prettier --write src/ test/",
+    "lint": "oxlint src/ test/",
+    "format": "oxfmt --write src/ test/",
+    "format:check": "oxfmt --check src/ test/",
     "typecheck": "tsc --noEmit",
     "spec": "DEBUG=prisma-queue,prisma-query vitest --run --pool=forks",
     "coverage": "DEBUG=prisma-queue,prisma-query vitest --run --pool=forks --coverage",
@@ -48,10 +48,9 @@
     "debug": "^4.4.3"
   },
   "peerDependencies": {
-    "@prisma/client": ">=3"
+    "@prisma/client": ">=3 <7"
   },
   "devDependencies": {
-    "@mgcrea/eslint-config-node": "^0.14.1",
     "@prisma/client": "6.16.2",
     "@tsconfig/node-lts": "^24.0.0",
     "@tsconfig/strictest": "^2.0.8",
@@ -59,9 +58,8 @@
     "@types/node": "^24.10.6",
     "@vitest/coverage-v8": "^4.0.16",
     "dotenv-cli": "^11.0.0",
-    "eslint": "^9.39.2",
-    "prettier": "^3.7.4",
-    "prettier-plugin-organize-imports": "^4.3.0",
+    "oxfmt": "^0.22.0",
+    "oxlint": "^1.0.0",
     "prisma": "6.16.2",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",

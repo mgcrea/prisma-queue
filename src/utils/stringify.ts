@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import type { Prisma } from "@prisma/client";
 
 type InputJsonValue = Prisma.InputJsonValue;

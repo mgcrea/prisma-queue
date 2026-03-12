@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Prisma, PrismaClient } from "@prisma/client";
 import { Cron } from "croner";
 import { EventEmitter } from "events";
@@ -54,7 +53,6 @@ export type PrismaQueueEvents<T extends JobPayload = JobPayload, U extends JobRe
   error: (error: unknown) => void;
 };
 
-// eslint-disable-next-line @typescript-eslint/consistent-type-definitions
 export interface PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult = JobResult> {
   on<E extends keyof PrismaQueueEvents<T, U>>(event: E, listener: PrismaQueueEvents<T, U>[E]): this;
   once<E extends keyof PrismaQueueEvents<T, U>>(event: E, listener: PrismaQueueEvents<T, U>[E]): this;
@@ -73,7 +71,6 @@ const defaultRetryStrategy: RetryStrategy = ({ attempts, maxAttempts }) => {
   return calculateDelay(attempts);
 };
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class PrismaQueue<
   T extends JobPayload = JobPayload,
   U extends JobResult = JobResult,
@@ -344,7 +341,6 @@ export class PrismaQueue<
         }
         // Emit error and continue polling after a delay
         this.emit("error", error);
-        // eslint-disable-next-line @typescript-eslint/no-empty-function
         await waitFor(pollInterval, this.abortController.signal).catch(() => {});
       }
     }
