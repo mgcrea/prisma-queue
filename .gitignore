@@ -2,6 +2,7 @@
 coverage/
 data/
 dist/
+prisma/client/
 lib/
 node_modules/
 .vscode/
