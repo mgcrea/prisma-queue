@@ -1,6 +1,5 @@
-import { describe, expect, it } from "vitest";
-
 import { prepareForJson, restoreFromJson } from "src/utils";
+import { describe, expect, it } from "vitest";
 
 describe("JSON serialization", () => {
   it("should handle undefined", () => {

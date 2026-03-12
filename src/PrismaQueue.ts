@@ -1,7 +1,9 @@
-/* eslint-disable @typescript-eslint/no-unnecessary-condition */
-import { Cron } from "croner";
 import { EventEmitter } from "events";
 import assert from "node:assert";
+
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
+import { Cron } from "croner";
+
 import { PrismaJob } from "./PrismaJob";
 import type {
   DatabaseJob,

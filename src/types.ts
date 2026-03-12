@@ -45,10 +45,11 @@ export type JobWorker<T extends JobPayload = JobPayload, U extends JobResult = J
   client: TransactionClient<C>,
 ) => Promise<U>;
 
-export type JobWorkerWithClient<T extends JobPayload = JobPayload, U extends JobResult = JobResult, C = unknown> = (
-  job: PrismaJob<T, U>,
-  client: C,
-) => Promise<U>;
+export type JobWorkerWithClient<
+  T extends JobPayload = JobPayload,
+  U extends JobResult = JobResult,
+  C = unknown,
+> = (job: PrismaJob<T, U>, client: C) => Promise<U>;
 
 export type RetryContext = {
   attempts: number;

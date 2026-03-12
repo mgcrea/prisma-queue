@@ -1,32 +1,29 @@
 {
   "name": "@mgcrea/prisma-queue",
-  "version": "2.0.0",
+  "version": "1.14.1",
+  "keywords": [
+    "job",
+    "postgresql",
+    "prisma",
+    "queue",
+    "worker"
+  ],
+  "license": "MIT",
   "author": "Olivier Louvignes <olivier@mgcrea.io>",
   "repository": "github:mgcrea/fastify-session-prisma-store",
-  "license": "MIT",
+  "files": [
+    "dist"
+  ],
   "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "require": "./dist/index.cjs",
       "import": "./dist/index.js"
     }
   },
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "engines": {
-    "node": ">=12"
-  },
-  "files": [
-    "dist"
-  ],
-  "keywords": [
-    "prisma",
-    "postgresql",
-    "job",
-    "queue",
-    "worker"
-  ],
   "scripts": {
     "start": "DEBUG=prisma-queue,prisma-query vitest",
     "build": "tsup",
@@ -46,10 +43,6 @@
     "croner": "^10.0.1",
     "debug": "^4.4.3"
   },
-  "peerDependencies": {
-    "@prisma/client": ">=7",
-    "@prisma/adapter-pg": ">=7"
-  },
   "devDependencies": {
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
@@ -67,6 +60,13 @@
     "typescript": "^5.9.3",
     "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^4.1.0"
+  },
+  "peerDependencies": {
+    "@prisma/adapter-pg": ">=7",
+    "@prisma/client": ">=7"
+  },
+  "engines": {
+    "node": ">=12"
   },
   "packageManager": "pnpm@10.32.1"
 }

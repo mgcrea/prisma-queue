@@ -1,5 +1,6 @@
 import { PrismaJob, PrismaQueue, PrismaQueueEvents, createQueue, type PrismaQueueOptions } from "src/index";
 import type { JobPayload, JobResult, JobWorker, JobWorkerWithClient } from "src/types";
+
 import { prisma } from "./client";
 
 type Client = typeof prisma;

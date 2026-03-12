@@ -1,6 +1,7 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../../prisma/client/client.js";
 import createDebug from "debug";
+
+import { PrismaClient } from "../../prisma/client/client.js";
 
 const debug = createDebug("prisma-query");
 
