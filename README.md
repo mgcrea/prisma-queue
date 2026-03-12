@@ -33,6 +33,7 @@ Simple, reliable and efficient concurrent work queue for [Prisma](https://prisma
 - Pluggable retry strategies with exponential backoff by default
 - Cooperative worker cancellation via `AbortSignal`
 - Separate `jobError` / `error` events for clean observability
+- Compatible with **Prisma 7+** and any Prisma driver adapter (e.g. `@prisma/adapter-pg`)
 - Written in [TypeScript](https://www.typescriptlang.org/) for static type checking with exported types along the library.
 - Built by [tsup](https://tsup.egoist.dev) to provide both CommonJS and ESM packages.
 
@@ -44,6 +45,14 @@ npm install @mgcrea/prisma-queue --save
 pnpm add @mgcrea/prisma-queue
 ```
 
+### Peer dependencies
+
+This library requires **Prisma 7+** with a driver adapter:
+
+```bash
+pnpm add @prisma/client @prisma/adapter-pg
+```
+
 ## Quickstart
 
 1. Append the [`QueueJob` model](./prisma/schema.prisma) to your `schema.prisma` file
@@ -51,22 +60,30 @@ pnpm add @mgcrea/prisma-queue
 1. Create your queue
 
 ```ts
+import { createQueue } from "@mgcrea/prisma-queue";
+import { prisma } from "./prisma"; // your PrismaClient instance
+
 type JobPayload = { email: string };
 type JobResult = { status: number };
 
-export const emailQueue = createQueue<JobPayload, JobResult>({ name: "email" }, async (job, client) => {
-  const { id, payload } = job;
-  console.log(`Processing job#${id} with payload=${JSON.stringify(payload)})`);
-  // await someAsyncMethod();
-  await job.progress(50);
-  const status = 200;
-  if (Math.random() > 0.5) {
-    throw new Error(`Failed for some unknown reason`);
-  }
-  console.log(`Finished job#${id} with status=${status}`);
-  return { status };
-});
+export const emailQueue = createQueue<JobPayload, JobResult, typeof prisma>(
+  { prisma, name: "email" },
+  async (job, client) => {
+    const { id, payload } = job;
+    console.log(`Processing job#${id} with payload=${JSON.stringify(payload)})`);
+    // await someAsyncMethod();
+    await job.progress(50);
+    const status = 200;
+    if (Math.random() > 0.5) {
+      throw new Error(`Failed for some unknown reason`);
+    }
+    console.log(`Finished job#${id} with status=${status}`);
+    return { status };
+  },
+);
 ```
+
+> **Note**: The `client` parameter in the worker is a transaction-scoped client (in the default transactional mode) with full typed access to your Prisma models. TypeScript infers the client type from the `prisma` option you pass.
 
 - Queue a job
 
@@ -113,13 +130,13 @@ main();
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `prisma` | `PrismaClient` | `new PrismaClient()` | Prisma client instance |
+| `prisma` | `PrismaClient` | **(required)** | Your Prisma client instance |
 | `name` | `string` | `"default"` | Queue name for partitioning jobs |
 | `maxAttempts` | `number \| null` | `null` | Max retry attempts (`null` = unlimited) |
 | `maxConcurrency` | `number` | `1` | Max concurrent jobs |
 | `pollInterval` | `number` | `10000` | Polling interval in ms |
 | `jobInterval` | `number` | `50` | Delay between job dispatches in ms |
-| `tableName` | `string` | Auto-detected | Database table name (required in edge environments) |
+| `tableName` | `string` | `"queue_jobs"` | Database table name (must match `@@map` in your schema) |
 | `deleteOn` | `"success" \| "failure" \| "always" \| "never"` | `"never"` | When to delete completed jobs |
 | `transactionTimeout` | `number` | `1800000` | Transaction timeout in ms (30 min) |
 | `retryStrategy` | `RetryStrategy` | Exponential backoff | Custom retry logic |
@@ -160,8 +177,9 @@ By default, failed jobs are retried with exponential backoff (2^attempts seconds
 ```ts
 import { createQueue, type RetryContext } from "@mgcrea/prisma-queue";
 
-const queue = createQueue(
+const queue = createQueue<JobPayload, JobResult, typeof prisma>(
   {
+    prisma,
     name: "email",
     maxAttempts: 5,
     retryStrategy: ({ attempts, maxAttempts, error }: RetryContext) => {
@@ -182,15 +200,18 @@ const queue = createQueue(
 Dequeued jobs expose an `AbortSignal` that is triggered when `queue.stop()` is called. Use it to cooperatively cancel long-running work:
 
 ```ts
-const queue = createQueue({ name: "email" }, async (job, client) => {
-  for (const item of items) {
-    if (job.signal.aborted) {
-      throw new Error("Job cancelled");
+const queue = createQueue<JobPayload, JobResult, typeof prisma>(
+  { prisma, name: "email" },
+  async (job, client) => {
+    for (const item of items) {
+      if (job.signal.aborted) {
+        throw new Error("Job cancelled");
+      }
+      await processItem(item);
     }
-    await processItem(item);
-  }
-  return { status: "done" };
-});
+    return { status: "done" };
+  },
+);
 ```
 
 ### Non-Transactional Mode
@@ -200,8 +221,8 @@ By default, the worker runs inside the dequeue transaction (exactly-once semanti
 ```ts
 import { createQueue, type JobWorkerWithClient } from "@mgcrea/prisma-queue";
 
-const queue = createQueue<JobPayload, JobResult>(
-  { name: "email", transactional: false },
+const queue = createQueue<JobPayload, JobResult, typeof prisma>(
+  { prisma, name: "email", transactional: false },
   async (job, client) => {
     // client is the full PrismaClient — $transaction is available
     await client.$transaction(async (tx) => {
@@ -221,24 +242,6 @@ const count = await queue.requeueStale({ olderThanMs: 5 * 60 * 1000 });
 ```
 
 Note: `isLocked()` returns `false` during worker execution in non-transactional mode since the row lock is released after claiming.
-
-### Edge Environments
-
-When using this library in edge environments (Cloudflare Workers, Vercel Edge Functions, etc.) where Prisma's DMMF (Datamodel Meta Format) may not be available, you must provide the `tableName` option:
-
-```ts
-export const emailQueue = createQueue<JobPayload, JobResult>(
-  {
-    name: "email",
-    tableName: "queue_jobs", // Required in edge environments
-  },
-  async (job, client) => {
-    // ...
-  },
-);
-```
-
-The library will throw an error if DMMF is unavailable and no `tableName` is provided.
 
 ### Threading
 
@@ -331,38 +334,81 @@ process.exit(0);
 
 ## Migration Guide
 
-### Migrating from v1 to v2
+### Migrating from v1.x to v2.0
 
-**Worker receives transactional client**: The worker callback's second parameter is now the Prisma transactional client (`PrismaLightClient`) instead of the root `PrismaClient`. Operations like `$transaction`, `$connect`, `$disconnect`, `$on`, `$use`, or `$extends` are not available inside the worker — perform those outside the worker.
+v2.0 drops `@prisma/client` imports entirely, making the library compatible with **Prisma 7+** and its new `prisma-client` generator. This is a breaking release.
 
-**`modelName` option removed**: The library now resolves the Prisma delegate once in the constructor. If you were passing `modelName`, remove it — the library only supports the `QueueJob` model. Use `tableName` to override the database table name if needed.
+#### Breaking changes
 
-**Error events split**: The `error` event no longer includes a `job` parameter. Worker failures now emit `jobError` instead:
+**1. `prisma` option is now required**
+
+The library no longer creates a default `PrismaClient`. You must pass your own instance:
 
 ```ts
 // v1
-queue.on("error", (error, job?) => { /* both job and system errors */ });
+const queue = createQueue({ name: "email" }, worker);
 
 // v2
-queue.on("jobError", (error, job) => { /* job execution failures */ });
-queue.on("error", (error) => { /* system/infrastructure errors */ });
+import { prisma } from "./prisma";
+const queue = createQueue({ prisma, name: "email" }, worker);
 ```
 
-**`retryStrategy` replaces hardcoded backoff**: The retry logic is now configurable. The default behavior is preserved, but if you were relying on the exact backoff timing, note that it's now driven by the `retryStrategy` option.
+**2. Third type parameter `C` for client type**
 
-**`alignTimeZone` option removed**: This option was deprecated and has been removed.
+`createQueue` and `PrismaQueue` now accept a third generic `C` that represents your PrismaClient type. TypeScript infers `C` from the `prisma` option, but if you explicitly specify type parameters, you must include all three:
 
-**`transactionTimeout` option added**: Defaults to 30 minutes (was hardcoded at 24 hours). Configure via the `transactionTimeout` option in milliseconds.
+```ts
+// v1
+createQueue<MyPayload, MyResult>({ name: "email" }, worker);
 
-**Edge environments require explicit `tableName`**: The library now throws if DMMF is unavailable and no `tableName` is provided (previously it guessed using `snake_case + "s"`).
-
-**Database index reordered**: The index on `QueueJob` changed from `[queue, priority, runAt, finishedAt]` to `[queue, finishedAt, processedAt, priority, runAt]`. Run a Prisma migration to update the index after upgrading.
-
-**Dequeue now filters on `processedAt IS NULL`**: The dequeue query now requires `processedAt` to be null. Existing in-flight or crashed jobs with non-null `processedAt` and null `finishedAt` will no longer be picked up. Run this migration during a drained-queue window:
-
-```sql
-UPDATE queue_jobs SET "processedAt" = NULL WHERE "finishedAt" IS NULL;
+// v2
+createQueue<MyPayload, MyResult, typeof prisma>({ prisma, name: "email" }, worker);
 ```
+
+**3. Peer dependency: Prisma 7+**
+
+The peer dependency changed from `@prisma/client >=3 <7` to `@prisma/client >=7` plus `@prisma/adapter-pg >=7`. You need a Prisma driver adapter:
+
+```bash
+pnpm add @prisma/client @prisma/adapter-pg pg
+```
+
+And configure your PrismaClient with the adapter:
+
+```ts
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "./prisma/client/client.js";
+
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+export const prisma = new PrismaClient({ adapter });
+```
+
+**4. `tableName` defaults to `"queue_jobs"`**
+
+DMMF-based table name auto-detection has been removed. The default is now `"queue_jobs"` (matching the `@@map` in the documented schema). If you use a custom table name, pass it explicitly:
+
+```ts
+createQueue({ prisma, name: "email", tableName: "my_custom_table" }, worker);
+```
+
+**5. `PrismaLightClient` type removed**
+
+The `PrismaLightClient` type has been replaced by `TransactionClient<C>`, which is computed from your actual PrismaClient type. If you referenced `PrismaLightClient` in your code, replace it with `TransactionClient<typeof prisma>`.
+
+**6. `void` is now a valid `JobResult`**
+
+Workers that don't return a value no longer need to return `null`. `void` is accepted as a result type:
+
+```ts
+type ScanResult = void;
+createQueue<ScanPayload, ScanResult, typeof prisma>({ prisma, name: "scan" }, async (job, client) => {
+  // no return needed
+});
+```
+
+#### No schema changes required
+
+The database schema, table structure, and indexes are unchanged from v1.x. No migration is needed for your database.
 
 ## Authors
 
