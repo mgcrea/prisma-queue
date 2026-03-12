@@ -1,4 +1,3 @@
-import type { PrismaClient } from "@prisma/client";
 import type { PrismaQueue } from "src/index";
 import { PrismaJob } from "src/PrismaJob";
 import { debug, serializeError, waitFor } from "src/utils";
@@ -15,6 +14,9 @@ import {
   type EmailJobResult,
 } from "test/utils";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+type Client = typeof prisma;
+type EmailQueue = PrismaQueue<EmailJobPayload, EmailJobResult, Client>;
 
 const AnyPrismaClient = expect.any(Object);
 
@@ -39,7 +41,7 @@ describe("PrismaQueue", () => {
     `);
   });
   describe("enqueue", () => {
-    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    let queue: EmailQueue;
     beforeAll(() => {
       queue = createEmailQueue();
     });
@@ -84,7 +86,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("schedule", () => {
-    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    let queue: EmailQueue;
     beforeAll(() => {
       queue = createEmailQueue();
     });
@@ -137,7 +139,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("dequeue", () => {
-    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    let queue: EmailQueue;
     beforeAll(() => {
       queue = createEmailQueue();
     });
@@ -235,7 +237,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("Job.signal", () => {
-    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    let queue: EmailQueue;
     beforeAll(() => {
       queue = createEmailQueue({ pollInterval: 200 });
     });
@@ -318,7 +320,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("deleteOn", () => {
-    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    let queue: EmailQueue;
     describe("success", () => {
       beforeAll(() => {
         queue = createEmailQueue({ deleteOn: "success" });
@@ -411,7 +413,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("maxConcurrency", () => {
-    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    let queue: EmailQueue;
     beforeAll(() => {
       queue = createEmailQueue({ maxConcurrency: 2 });
     });
@@ -442,7 +444,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("priority", () => {
-    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    let queue: EmailQueue;
     beforeAll(() => {
       queue = createEmailQueue();
     });
@@ -483,7 +485,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("Job.progress()", () => {
-    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    let queue: EmailQueue;
     beforeAll(() => {
       queue = createEmailQueue();
     });
@@ -551,7 +553,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("Job.isLocked()", () => {
-    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    let queue: EmailQueue;
     beforeAll(() => {
       queue = createEmailQueue({ pollInterval: 200 });
     });
@@ -579,7 +581,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("polling behavior", () => {
-    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    let queue: EmailQueue;
     beforeAll(() => {
       queue = createEmailQueue({ pollInterval: 100, jobInterval: 10 });
     });
@@ -719,7 +721,7 @@ describe("PrismaQueue", () => {
   });
 
   describe("stop behavior", () => {
-    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    let queue: EmailQueue;
     beforeAll(() => {
       queue = createEmailQueue({ pollInterval: 100, jobInterval: 10 });
     });
@@ -850,7 +852,7 @@ describe("PrismaQueue", () => {
 
 describe("PrismaQueue (transactional: false)", () => {
   describe("dequeue", () => {
-    let queue: PrismaQueue<EmailJobPayload, EmailJobResult>;
+    let queue: EmailQueue;
     beforeAll(() => {
       queue = createEmailQueueNonTransactional();
     });
@@ -887,7 +889,7 @@ describe("PrismaQueue (transactional: false)", () => {
     });
     it("should provide PrismaClient with $transaction to worker", async () => {
       let clientHasTransaction = false;
-      queue.worker = vi.fn(async (_job: EmailJob, client: PrismaClient) => {
+      queue.worker = vi.fn(async (_job: EmailJob, client: typeof prisma) => {
         clientHasTransaction = typeof client.$transaction === "function";
         return { code: "200" };
       });

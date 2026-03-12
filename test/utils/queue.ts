@@ -2,6 +2,8 @@ import { PrismaJob, PrismaQueue, PrismaQueueEvents, createQueue, type PrismaQueu
 import type { JobPayload, JobResult, JobWorker, JobWorkerWithClient } from "src/types";
 import { prisma } from "./client";
 
+type Client = typeof prisma;
+
 export type EmailJobPayload = { email: string };
 export type EmailJobResult = { code: string };
 export type EmailJob = PrismaJob<EmailJobPayload, EmailJobResult>;
@@ -10,8 +12,8 @@ export const DEFAULT_POLL_INTERVAL = 500;
 let globalQueueIndex = 0;
 
 export const createEmailQueue = (
-  options: PrismaQueueOptions = {},
-  worker: JobWorker<EmailJobPayload, EmailJobResult> = async (_job) => {
+  options: Omit<PrismaQueueOptions<Client>, "prisma"> = {},
+  worker: JobWorker<EmailJobPayload, EmailJobResult, Client> = async (_job) => {
     return { code: "200" };
   },
 ) => {
@@ -21,7 +23,7 @@ export const createEmailQueue = (
     ...otherOptions
   } = options;
   globalQueueIndex++;
-  return createQueue<EmailJobPayload, EmailJobResult>(
+  return createQueue<EmailJobPayload, EmailJobResult, Client>(
     {
       prisma,
       name,
@@ -33,8 +35,8 @@ export const createEmailQueue = (
 };
 
 export const createEmailQueueNonTransactional = (
-  options: Omit<PrismaQueueOptions, "transactional"> = {},
-  worker: JobWorkerWithClient<EmailJobPayload, EmailJobResult> = async (_job, _client) => {
+  options: Omit<PrismaQueueOptions<Client>, "prisma" | "transactional"> = {},
+  worker: JobWorkerWithClient<EmailJobPayload, EmailJobResult, Client> = async (_job, _client) => {
     return { code: "200" };
   },
 ) => {
@@ -44,7 +46,7 @@ export const createEmailQueueNonTransactional = (
     ...otherOptions
   } = options;
   globalQueueIndex++;
-  return createQueue<EmailJobPayload, EmailJobResult>(
+  return createQueue<EmailJobPayload, EmailJobResult, Client>(
     {
       prisma,
       name,
@@ -56,16 +58,19 @@ export const createEmailQueueNonTransactional = (
   );
 };
 
-export const waitForNextJob = <T extends JobPayload, U extends JobResult>(queue: PrismaQueue<T, U>) =>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const waitForNextJob = <T extends JobPayload, U extends JobResult>(queue: PrismaQueue<T, U, any>) =>
   waitForNextEvent(queue, "dequeue");
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const waitForNthJob = <T extends JobPayload, U extends JobResult>(
-  queue: PrismaQueue<T, U>,
+  queue: PrismaQueue<T, U, any>,
   nth: number,
 ) => waitForNthEvent(queue, "dequeue", nth);
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const waitForNextEvent = <T extends JobPayload, U extends JobResult>(
-  queue: PrismaQueue<T, U>,
+  queue: PrismaQueue<T, U, any>,
   eventName: keyof PrismaQueueEvents<T, U>,
 ) =>
   new Promise((resolve) => {
@@ -75,8 +80,9 @@ export const waitForNextEvent = <T extends JobPayload, U extends JobResult>(
     queue.once(eventName, listener);
   });
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const waitForNthEvent = <T extends JobPayload, U extends JobResult>(
-  queue: PrismaQueue<T, U>,
+  queue: PrismaQueue<T, U, any>,
   eventName: keyof PrismaQueueEvents<T, U>,
   nth = 1,
 ) =>
