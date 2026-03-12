@@ -1,6 +1,6 @@
 {
   "name": "@mgcrea/prisma-queue",
-  "version": "1.14.0",
+  "version": "2.0.0",
   "author": "Olivier Louvignes <olivier@mgcrea.io>",
   "repository": "github:mgcrea/fastify-session-prisma-store",
   "license": "MIT",
@@ -33,39 +33,40 @@
     "lint": "oxlint src/ test/",
     "format": "oxfmt --write src/ test/",
     "format:check": "oxfmt --check src/ test/",
-    "typecheck": "tsc --noEmit",
+    "check": "tsc --noEmit",
     "spec": "DEBUG=prisma-queue,prisma-query vitest --run --pool=forks",
     "coverage": "DEBUG=prisma-queue,prisma-query vitest --run --pool=forks --coverage",
     "dev": "DEBUG=prisma-queue vitest --watch --pool=forks --reporter=dot",
-    "test": "npm run lint && npm run prettycheck && npm run typecheck && npm run spec",
+    "test": "pnpm run lint && pnpm run check && pnpm run spec && pnpm run format:check",
     "prepare": "prisma generate",
     "reset": "prisma db push --force-reset && prisma generate",
-    "prepublishOnly": "npm run build",
-    "with-env": "dotenv -e ./.env --"
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "croner": "^9.1.0",
+    "croner": "^10.0.1",
     "debug": "^4.4.3"
   },
   "peerDependencies": {
-    "@prisma/client": ">=3 <7"
+    "@prisma/client": ">=7",
+    "@prisma/adapter-pg": ">=7"
   },
   "devDependencies": {
-    "@prisma/client": "6.16.2",
+    "@prisma/adapter-pg": "^7.5.0",
+    "@prisma/client": "^7.5.0",
     "@tsconfig/node-lts": "^24.0.0",
     "@tsconfig/strictest": "^2.0.8",
     "@types/debug": "^4.1.12",
     "@types/node": "^24.10.6",
-    "@vitest/coverage-v8": "^4.0.16",
+    "@vitest/coverage-v8": "^4.1.0",
     "dotenv-cli": "^11.0.0",
-    "oxfmt": "^0.22.0",
-    "oxlint": "^1.0.0",
-    "prisma": "6.16.2",
+    "oxfmt": "^0.40.0",
+    "oxlint": "^1.55.0",
+    "prisma": "^7.5.0",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vite-tsconfig-paths": "^6.0.4",
-    "vitest": "^4.0.16"
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.0"
   },
-  "packageManager": "pnpm@10.28.0"
+  "packageManager": "pnpm@10.32.1"
 }
