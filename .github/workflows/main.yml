@@ -45,14 +45,12 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Generate & push prisma schema 🪄
         run: pnpm prisma db push
-      - name: Lint 🔍
+      - name: Lint (oxlint) 🔍
         run: pnpm run lint
-      - name: Prettier 🔍
-        run: pnpm run prettycheck
-      - name: Debug 🔍
-        run: ls -la node_modules
+      - name: Format (oxfmt) 🔍
+        run: pnpm run format:check
       - name: TypeScript 🔍
-        run: pnpm run typecheck
+        run: pnpm run check
       - name: Vitest 🔍
         run: pnpm run spec
   build:
