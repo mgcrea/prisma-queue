@@ -16,17 +16,23 @@
   ],
   "type": "module",
   "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
-      "require": "./dist/index.cjs",
-      "import": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
   "scripts": {
     "start": "DEBUG=prisma-queue,prisma-query vitest",
-    "build": "tsup",
+    "build": "tsdown",
     "lint": "oxlint src/ test/",
     "format": "oxfmt --write src/ test/",
     "format:check": "oxfmt --check src/ test/",
@@ -55,7 +61,7 @@
     "oxfmt": "^0.40.0",
     "oxlint": "^1.55.0",
     "prisma": "^7.5.0",
-    "tsup": "^8.5.1",
+    "tsdown": "^0.18.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite-tsconfig-paths": "^6.1.1",

@@ -35,7 +35,7 @@ Simple, reliable and efficient concurrent work queue for [Prisma](https://prisma
 - Separate `jobError` / `error` events for clean observability
 - Compatible with **Prisma 7+** and any Prisma driver adapter (e.g. `@prisma/adapter-pg`)
 - Written in [TypeScript](https://www.typescriptlang.org/) for static type checking with exported types along the library.
-- Built by [tsup](https://tsup.egoist.dev) to provide both CommonJS and ESM packages.
+- Built by [tsdown](https://tsdown.dev) to provide both CommonJS and ESM packages.
 
 ## Install
 
