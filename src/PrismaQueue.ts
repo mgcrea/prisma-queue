@@ -47,6 +47,11 @@ export type ScheduleOptions = Omit<EnqueueOptions, "key" | "cron"> & {
   cron: string;
 };
 
+type DequeueOutcome<T extends JobPayload, U extends JobResult> =
+  | { job: PrismaJob<T, U> | null; status: "none" }
+  | { job: PrismaJob<T, U>; status: "success"; result: U }
+  | { job: PrismaJob<T, U>; status: "error"; error: unknown };
+
 export type PrismaQueueEvents<T extends JobPayload = JobPayload, U extends JobResult = JobResult> = {
   enqueue: (job: PrismaJob<T, U>) => void;
   dequeue: (job: PrismaJob<T, U>) => void;
@@ -265,7 +270,7 @@ export class PrismaQueue<
           debug(`deleted ${count} conflicting upcoming queue jobs`);
         }
         return await model.upsert({
-          where: { key_runAt: { key, runAt } },
+          where: { queue_key_runAt: { queue: queueName, key, runAt } },
           create: data,
           update: data,
         });
@@ -370,17 +375,18 @@ export class PrismaQueue<
     }
     debug(`dequeuing from queue named="${this.name}"...`);
 
-    const { job, successResult, errorResult } = this.config.transactional
+    const outcome = this.config.transactional
       ? await this.dequeueTransactional()
       : await this.dequeueNonTransactional();
+    const { job } = outcome;
 
     if (job) {
       // Emit events in logical order: dequeue first, then success/error
       this.emit("dequeue", job);
-      if (successResult !== undefined) {
-        this.emit("success", successResult, job);
-      } else if (errorResult !== undefined) {
-        this.emit("jobError", errorResult, job);
+      if (outcome.status === "success") {
+        this.emit("success", outcome.result, job);
+      } else if (outcome.status === "error") {
+        this.emit("jobError", outcome.error, job);
       }
 
       const { key, cron, payload, finishedAt } = job;
@@ -400,22 +406,15 @@ export class PrismaQueue<
     return job;
   }
 
-  private async dequeueTransactional(): Promise<{
-    job: PrismaJob<T, U> | null;
-    successResult: U | undefined;
-    errorResult: unknown;
-  }> {
+  private async dequeueTransactional(): Promise<DequeueOutcome<T, U>> {
     const { name: queueName } = this;
     const { deleteOn, transactionTimeout } = this.config;
     const tableName = this.#escapedTableName;
     const now = new Date();
     const worker = this.worker as JobWorker<T, U, C>;
 
-    let successResult: U | undefined;
-    let errorResult: unknown;
-
-    const job = await (this.#prisma as any).$transaction(
-      async (client: TransactionClient<C>) => {
+    return (await (this.#prisma as any).$transaction(
+      async (client: TransactionClient<C>): Promise<DequeueOutcome<T, U>> => {
         const rows: DatabaseJob<T, U>[] = await (client as any).$queryRawUnsafe(
           `UPDATE ${tableName} SET "processedAt" = $2, "attempts" = "attempts" + 1
            WHERE id = (
@@ -436,7 +435,7 @@ export class PrismaQueue<
         );
         if (!rows.length || !rows[0]) {
           debug(`no jobs found in queue named="${this.name}"`);
-          return null;
+          return { job: null, status: "none" };
         }
         const { id, payload, attempts, maxAttempts } = rows[0];
         const job = new PrismaJob<T, U>(rows[0], {
@@ -445,17 +444,16 @@ export class PrismaQueue<
           tableName,
           signal: this.abortController.signal,
         });
-        let result;
         try {
           debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
-          result = await worker(job, client);
+          const result = await worker(job, client);
           debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
           const date = new Date();
           await job.update({ finishedAt: date, progress: 100, result, error: null });
-          successResult = result;
           if (deleteOn === "success" || deleteOn === "always") {
             await job.delete();
           }
+          return { job, status: "success", result };
         } catch (error) {
           const date = new Date();
           debug(
@@ -481,33 +479,24 @@ export class PrismaQueue<
               notBefore: null,
             });
           }
-          errorResult = error;
-          if (deleteOn === "failure" || deleteOn === "always") {
+          // Only delete on terminal failure — otherwise the retry update is wasted.
+          if (isFinished && (deleteOn === "failure" || deleteOn === "always")) {
             await job.delete();
           }
+          return { job, status: "error", error };
         }
-        return job;
       },
       // @NOTE https://github.com/prisma/prisma/issues/11565#issuecomment-1031380271
       { timeout: transactionTimeout },
-    );
-
-    return { job, successResult, errorResult };
+    )) as DequeueOutcome<T, U>;
   }
 
-  private async dequeueNonTransactional(): Promise<{
-    job: PrismaJob<T, U> | null;
-    successResult: U | undefined;
-    errorResult: unknown;
-  }> {
+  private async dequeueNonTransactional(): Promise<DequeueOutcome<T, U>> {
     const { name: queueName } = this;
     const { deleteOn } = this.config;
     const tableName = this.#escapedTableName;
     const now = new Date();
     const worker = this.worker as JobWorkerWithClient<T, U, C>;
-
-    let successResult: U | undefined;
-    let errorResult: unknown;
 
     // Phase 1: Claim the job atomically (single-statement implicit transaction)
     const rows: DatabaseJob<T, U>[] = await (this.#prisma as any).$queryRawUnsafe(
@@ -531,7 +520,7 @@ export class PrismaQueue<
 
     if (!rows.length || !rows[0]) {
       debug(`no jobs found in queue named="${this.name}"`);
-      return { job: null, successResult: undefined, errorResult: undefined };
+      return { job: null, status: "none" };
     }
 
     const { id, payload, attempts, maxAttempts } = rows[0];
@@ -551,10 +540,10 @@ export class PrismaQueue<
       // Phase 3a: Update success
       const date = new Date();
       await job.update({ finishedAt: date, progress: 100, result, error: null });
-      successResult = result;
       if (deleteOn === "success" || deleteOn === "always") {
         await job.delete();
       }
+      return { job, status: "success", result };
     } catch (error) {
       // Phase 3b: Update error/retry
       const date = new Date();
@@ -581,13 +570,12 @@ export class PrismaQueue<
           notBefore: null,
         });
       }
-      errorResult = error;
-      if (deleteOn === "failure" || deleteOn === "always") {
+      // Only delete on terminal failure — otherwise the retry update is wasted.
+      if (isFinished && (deleteOn === "failure" || deleteOn === "always")) {
         await job.delete();
       }
+      return { job, status: "error", error };
     }
-
-    return { job, successResult, errorResult };
   }
 
   /**

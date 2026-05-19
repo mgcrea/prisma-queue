@@ -30,7 +30,7 @@ model QueueJob {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  @@unique([key, runAt])
+  @@unique([queue, key, runAt])
   @@index([queue, finishedAt, processedAt, priority, runAt])
   @@map("queue_jobs")
 }

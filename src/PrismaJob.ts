@@ -113,12 +113,14 @@ export class PrismaJob<Payload, Result> {
 
   /**
    * Fetches the latest job record from the database and updates the internal state.
+   * Returns null when the row no longer exists (e.g. after `deleteOn` removed it);
+   * in that case the internal record is preserved so getters like `payload` keep working.
    */
-  public async fetch(): Promise<DatabaseJob<Payload, Result>> {
+  public async fetch(): Promise<DatabaseJob<Payload, Result> | null> {
     const record = (await this.#model.findUnique({
       where: { id: this.id },
-    })) as DatabaseJob<Payload, Result>;
-    this.#assign(record);
+    })) as DatabaseJob<Payload, Result> | null;
+    this.#assign(record ?? undefined);
     return record;
   }
 
