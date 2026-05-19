@@ -62,7 +62,7 @@ describe("PrismaQueue", () => {
           "signal",
         ]
       `);
-      const record = await job.fetch();
+      const record = (await job.fetch())!;
       expect(record.key).toBeNull();
       expect(record.payload).toEqual({ email: "foo@bar.com" });
       expect(record.runAt).toBeInstanceOf(Date);
@@ -78,7 +78,7 @@ describe("PrismaQueue", () => {
           "signal",
         ]
       `);
-      const record = await job.fetch();
+      const record = (await job.fetch())!;
       expect(record.payload).toEqual({ email: "foo@bar.com" });
       expect(record.runAt).toBeInstanceOf(Date);
       expect(record.key).toBe("custom-key");
@@ -103,7 +103,7 @@ describe("PrismaQueue", () => {
         { email: "foo@bar.com" },
       );
       expect(job).toBeInstanceOf(PrismaJob);
-      const record = await job.fetch();
+      const record = (await job.fetch())!;
       expect(record).toBeDefined();
       expect(record.runAt.getHours()).toBe(5);
       expect(record.runAt.getMinutes()).toBe(5);
@@ -159,7 +159,7 @@ describe("PrismaQueue", () => {
       await waitForNextJob(queue);
       expect(queue.worker).toHaveBeenCalledTimes(1);
       expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), AnyPrismaClient);
-      const record = await job.fetch();
+      const record = (await job.fetch())!;
       expect(record.finishedAt).toBeInstanceOf(Date);
     });
     it("should properly dequeue a failed job", async () => {
@@ -172,7 +172,7 @@ describe("PrismaQueue", () => {
       await waitForNextJob(queue);
       expect(queue.worker).toHaveBeenCalledTimes(1);
       expect(queue.worker).toHaveBeenNthCalledWith(1, expect.any(PrismaJob), AnyPrismaClient);
-      const record = await job.fetch();
+      const record = (await job.fetch())!;
       expect(record.finishedAt).toBeNull();
       expect(record.error).toEqual(serializeError(error));
     });
@@ -314,7 +314,7 @@ describe("PrismaQueue", () => {
       await waitForNextJob(queue);
       await queue.stop();
       expect(queue.worker).toHaveBeenCalledTimes(1);
-      const record = await job.fetch();
+      const record = (await job.fetch())!;
       expect(record.finishedAt).toBeInstanceOf(Date);
     });
   });
@@ -348,7 +348,8 @@ describe("PrismaQueue", () => {
     });
     describe("failure", () => {
       beforeAll(() => {
-        queue = createEmailQueue({ deleteOn: "failure" });
+        // maxAttempts: 1 keeps the first failure terminal so deleteOn applies.
+        queue = createEmailQueue({ deleteOn: "failure", maxAttempts: 1 });
       });
       beforeEach(async () => {
         await prisma.queueJob.deleteMany();
@@ -369,13 +370,45 @@ describe("PrismaQueue", () => {
         const record = await job.fetch();
         expect(record).toBeNull();
       });
+      it("should not delete a job that has retries remaining", async () => {
+        const retryQueue = createEmailQueue({
+          deleteOn: "failure",
+          maxAttempts: 3,
+          pollInterval: 200,
+          retryStrategy: ({ attempts, maxAttempts }) => {
+            if (maxAttempts !== null && attempts >= maxAttempts) return null;
+            return 50;
+          },
+        });
+        await prisma.queueJob.deleteMany();
+        retryQueue.worker = vi.fn(async () => {
+          throw new Error("retry me");
+        });
+        // Attach listeners before starting so we don't miss the first dequeue.
+        const firstJob = waitForNextJob(retryQueue);
+        const allJobs = waitForNthJob(retryQueue, 3);
+        const job = await retryQueue.enqueue({ email: "retry-delete@test.com" });
+        void retryQueue.start();
+        // After the first failure the row must still exist so the retry can run.
+        await firstJob;
+        const afterFirst = await job.fetch();
+        expect(afterFirst).not.toBeNull();
+        expect(afterFirst!.attempts).toBe(1);
+        expect(afterFirst!.finishedAt).toBeNull();
+        // After exhausting retries the terminal failure should delete the row.
+        await allJobs;
+        await retryQueue.stop();
+        const afterFinal = await job.fetch();
+        expect(afterFinal).toBeNull();
+      });
       afterAll(() => {
         void queue.stop();
       });
     });
     describe("always", () => {
       beforeAll(() => {
-        queue = createEmailQueue({ deleteOn: "always" });
+        // maxAttempts: 1 keeps the first failure terminal so deleteOn applies.
+        queue = createEmailQueue({ deleteOn: "always", maxAttempts: 1 });
       });
       beforeEach(async () => {
         await prisma.queueJob.deleteMany();
@@ -505,7 +538,7 @@ describe("PrismaQueue", () => {
       const job = await queue.enqueue({ email: "foo@bar.com" });
       void queue.start();
       await waitForNextJob(queue);
-      const record = await job.fetch();
+      const record = (await job.fetch())!;
       expect(record.progress).toBe(50);
     });
     afterAll(() => {
@@ -531,6 +564,27 @@ describe("PrismaQueue", () => {
       expect(jobErrors.length).toBe(1);
       expect(jobErrors[0]?.jobId).toBe(job.id);
       expect(jobErrors[0]?.error).toBeInstanceOf(Error);
+    });
+    it("should emit success even when worker returns void", async () => {
+      const queue = createEmailQueue({ pollInterval: 200 }) as PrismaQueue<
+        EmailJobPayload,
+        EmailJobResult | void,
+        Client
+      >;
+      await prisma.queueJob.deleteMany();
+      const successJobs: bigint[] = [];
+      queue.on("success", (_result, job) => {
+        successJobs.push(job.id);
+      });
+      // Worker returns undefined (void) — exercises the "no sentinel" path.
+      queue.worker = vi.fn(async () => {
+        return undefined;
+      });
+      const job = await queue.enqueue({ email: "void@test.com" });
+      void queue.start();
+      await waitForNextJob(queue);
+      await queue.stop();
+      expect(successJobs).toEqual([job.id]);
     });
     it("should not emit error event for worker failures", async () => {
       const queue = createEmailQueue({ pollInterval: 200 });
@@ -871,7 +925,7 @@ describe("PrismaQueue (transactional: false)", () => {
       const job = await queue.enqueue({ email: "foo@bar.com" });
       await waitForNextJob(queue);
       expect(queue.worker).toHaveBeenCalledTimes(1);
-      const record = await job.fetch();
+      const record = (await job.fetch())!;
       expect(record.finishedAt).toBeInstanceOf(Date);
     });
     it("should properly dequeue a failed job", async () => {
@@ -883,7 +937,7 @@ describe("PrismaQueue (transactional: false)", () => {
       const job = await queue.enqueue({ email: "foo@bar.com" });
       await waitForNextJob(queue);
       expect(queue.worker).toHaveBeenCalledTimes(1);
-      const record = await job.fetch();
+      const record = (await job.fetch())!;
       expect(record.finishedAt).toBeNull();
       expect(record.error).toEqual(serializeError(error));
     });
@@ -915,7 +969,7 @@ describe("PrismaQueue (transactional: false)", () => {
       // Wait for first dequeue
       await waitForNextJob(retryQueue);
       // After first failure, processedAt should be reset
-      const record = await job.fetch();
+      const record = (await job.fetch())!;
       expect(record.processedAt).toBeNull();
       expect(record.finishedAt).toBeNull();
       // Wait for remaining retries
@@ -923,7 +977,7 @@ describe("PrismaQueue (transactional: false)", () => {
       await retryQueue.stop();
       expect(retryQueue.worker).toHaveBeenCalledTimes(3);
       // After max attempts, job should be finished
-      const finalRecord = await job.fetch();
+      const finalRecord = (await job.fetch())!;
       expect(finalRecord.finishedAt).toBeInstanceOf(Date);
     });
     it("should work with deleteOn: success", async () => {
@@ -947,7 +1001,7 @@ describe("PrismaQueue (transactional: false)", () => {
       const job = await queue.enqueue({ email: "foo@bar.com" });
       void queue.start();
       await waitForNextJob(queue);
-      const record = await job.fetch();
+      const record = (await job.fetch())!;
       expect(record.progress).toBe(50);
     });
     it("should properly re-enqueue a recurring cron job", async () => {
