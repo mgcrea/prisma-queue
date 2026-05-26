@@ -29,7 +29,7 @@
 Simple, reliable and efficient concurrent work queue for [Prisma](https://prisma.io) + [PostgreSQL](https://www.postgresql.org/)
 
 - Leverages PostgreSQL [SKIP LOCKED](https://www.2ndquadrant.com/en/blog/what-is-select-skip-locked-for-in-postgresql-9-5/) feature to reliably dequeue jobs
-- Supports [crontab](https://crontab.guru) syntax for complex scheduled jobs
+- Supports [crontab](https://crontab.guru) syntax for complex scheduled jobs, or a structured `interval` for fixed cadences (e.g. every 20 hours)
 - Pluggable retry strategies with exponential backoff by default
 - Cooperative worker cancellation via `AbortSignal`
 - Separate `jobError` / `error` events for clean observability
@@ -97,14 +97,21 @@ const main = async () => {
 main();
 ```
 
-- Schedule a recurring job
+- Schedule a recurring job (cron or interval)
 
 ```ts
 import { emailQueue } from "./emailQueue";
 
 const main = async () => {
-  const nextJob = await queue.schedule(
+  // Cron expression — runs every day at 05:05
+  await queue.schedule(
     { key: "email-schedule", cron: "5 5 * * *" },
+    { email: "foo@bar.com" },
+  );
+
+  // Or a structured interval — runs every 20 hours after each completion
+  await queue.schedule(
+    { key: "email-sync", interval: { hours: 20 } },
     { email: "foo@bar.com" },
   );
 };
@@ -194,6 +201,48 @@ const queue = createQueue<JobPayload, JobResult, typeof prisma>(
   },
 );
 ```
+
+### Recurring Jobs
+
+`schedule()` accepts **either** a cron expression **or** a structured `interval` (not both). Both forms require a `key` so the queue can deduplicate and re-enqueue across runs.
+
+**Cron** — parsed by [croner](https://github.com/Hexagon/croner). The next `runAt` is computed from the cron expression after each completion:
+
+```ts
+await queue.schedule(
+  { key: "daily-report", cron: "0 6 * * *" },
+  { recipient: "ops@example.com" },
+);
+```
+
+**Interval** — a structured duration object. Accepts any combination of `seconds`, `minutes`, `hours`, `days`:
+
+```ts
+await queue.schedule(
+  { key: "sync", interval: { hours: 20 } },
+  { source: "upstream" },
+);
+
+await queue.schedule(
+  { key: "heartbeat", interval: { minutes: 5, seconds: 30 } },
+  { id: "node-1" },
+);
+```
+
+By default, the next run for an interval job is scheduled as `finishedAt + interval` — drift-tolerant, so a slow run doesn't cause a backlog. Pass `repeatFrom: "runAt"` for a fixed wall-clock cadence (`previousRunAt + interval`) — the same drift-free behavior as cron:
+
+```ts
+// Drift-free: every run lands on a 20-hour boundary from the first runAt
+await queue.schedule(
+  { key: "sync", interval: { hours: 20 }, repeatFrom: "runAt" },
+  { source: "upstream" },
+);
+```
+
+| `repeatFrom`               | Next `runAt`               | Behavior                                                                   |
+| -------------------------- | -------------------------- | -------------------------------------------------------------------------- |
+| `"finishedAt"` _(default)_ | `finishedAt + interval`    | Drift-tolerant: long-running jobs don't pile up                            |
+| `"runAt"`                  | `previousRunAt + interval` | Drift-free wall-clock cadence; long runs can produce overlapping schedules |
 
 ### Cooperative Worker Cancellation
 
