@@ -7,12 +7,23 @@ export type JsonValue = string | number | boolean | null | JsonObject | JsonArra
 export type JsonObject = { [key: string]: JsonValue };
 export type JsonArray = JsonValue[];
 
+export type IntervalDuration = {
+  seconds?: number;
+  minutes?: number;
+  hours?: number;
+  days?: number;
+};
+
+export type RepeatFrom = "finishedAt" | "runAt";
+
 // QueueJob record — mirrors the library's prisma schema
 export type QueueJobRecord = {
   id: bigint;
   queue: string;
   key: string | null;
   cron: string | null;
+  intervalMs: bigint | null;
+  repeatFrom: string | null;
   payload: JsonValue | null;
   result: JsonValue | null;
   error: JsonValue | null;

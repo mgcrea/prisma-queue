@@ -15,6 +15,8 @@ model QueueJob {
   queue       String
   key         String?
   cron        String?
+  intervalMs  BigInt?
+  repeatFrom  String?
   payload     Json?
   result      Json?
   error       Json?

@@ -76,6 +76,27 @@ export class PrismaJob<Payload, Result> {
   }
 
   /**
+   * Gets the interval in milliseconds for recurring scheduling, if any.
+   */
+  public get intervalMs() {
+    return this.#record.intervalMs;
+  }
+
+  /**
+   * Gets the anchor for interval-based rescheduling: "finishedAt" (default) or "runAt".
+   */
+  public get repeatFrom() {
+    return this.#record.repeatFrom;
+  }
+
+  /**
+   * Gets the scheduled run time of the job.
+   */
+  public get runAt() {
+    return this.#record.runAt;
+  }
+
+  /**
    * Gets the job's priority level.
    */
   public get priority() {

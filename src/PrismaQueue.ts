@@ -7,15 +7,17 @@ import { Cron } from "croner";
 import { PrismaJob } from "./PrismaJob";
 import type {
   DatabaseJob,
+  IntervalDuration,
   JobCreator,
   JobPayload,
   JobResult,
   JobWorker,
   JobWorkerWithClient,
+  RepeatFrom,
   RetryStrategy,
   TransactionClient,
 } from "./types";
-import { AbortError, calculateDelay, debug, escape, serializeError, waitFor } from "./utils";
+import { AbortError, calculateDelay, debug, escape, intervalToMs, serializeError, waitFor } from "./utils";
 
 export type PrismaQueueOptions<C = unknown> = {
   prisma: C;
@@ -36,16 +38,24 @@ export type PrismaQueueOptions<C = unknown> = {
 
 export type EnqueueOptions = {
   cron?: string;
+  intervalMs?: number;
+  repeatFrom?: RepeatFrom;
   runAt?: Date;
   key?: string;
   maxAttempts?: number;
   priority?: number;
 };
 
-export type ScheduleOptions = Omit<EnqueueOptions, "key" | "cron"> & {
+type BaseScheduleOptions = Omit<EnqueueOptions, "key" | "cron" | "intervalMs" | "repeatFrom"> & {
   key: string;
-  cron: string;
 };
+export type ScheduleOptions =
+  | (BaseScheduleOptions & { cron: string; interval?: never; repeatFrom?: never })
+  | (BaseScheduleOptions & {
+      interval: IntervalDuration;
+      cron?: never;
+      repeatFrom?: RepeatFrom;
+    });
 
 type DequeueOutcome<T extends JobPayload, U extends JobResult> =
   | { job: PrismaJob<T, U> | null; status: "none" }
@@ -239,7 +249,15 @@ export class PrismaQueue<
   ): Promise<PrismaJob<T, U>> {
     debug(`enqueue`, this.name, payloadOrFunction, options);
     const { name: queueName, config } = this;
-    const { key = null, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
+    const {
+      key = null,
+      cron = null,
+      intervalMs = null,
+      repeatFrom = null,
+      maxAttempts = config.maxAttempts,
+      priority = 0,
+      runAt,
+    } = options;
     const now = new Date();
     const record = await (this.#prisma as any).$transaction(async (client: TransactionClient<C>) => {
       const model = this.getModel(client);
@@ -248,6 +266,8 @@ export class PrismaQueue<
       const data = {
         queue: queueName,
         cron,
+        intervalMs: intervalMs === null ? null : BigInt(intervalMs),
+        repeatFrom,
         payload,
         maxAttempts,
         priority,
@@ -287,8 +307,8 @@ export class PrismaQueue<
   }
 
   /**
-   * Schedules a job according to the cron expression or a specific run time.
-   * @param options - Scheduling options including cron, key, and run time.
+   * Schedules a job according to a cron expression or a fixed interval.
+   * @param options - Scheduling options. Provide either `cron` or `interval` (not both).
    * @param payloadOrFunction - The job payload or a function that returns a job payload.
    */
   public async schedule(
@@ -296,10 +316,21 @@ export class PrismaQueue<
     payloadOrFunction: T | JobCreator<T, C>,
   ): Promise<PrismaJob<T, U>> {
     debug(`schedule`, this.name, options, payloadOrFunction);
-    const { key, cron, runAt: firstRunAt, ...otherOptions } = options;
-    const runAt = firstRunAt ?? new Cron(cron).nextRun();
-    assert(runAt, `Failed to find a future occurence for given cron`);
-    return this.enqueue(payloadOrFunction, { key, cron, runAt, ...otherOptions });
+    const { key, runAt: firstRunAt, maxAttempts, priority } = options;
+    const base: EnqueueOptions = { key };
+    if (maxAttempts !== undefined) base.maxAttempts = maxAttempts;
+    if (priority !== undefined) base.priority = priority;
+    if ("cron" in options && options.cron) {
+      assert(!("interval" in options && options.interval), "Provide either cron or interval, not both");
+      const runAt = firstRunAt ?? new Cron(options.cron).nextRun();
+      assert(runAt, `Failed to find a future occurence for given cron`);
+      return this.enqueue(payloadOrFunction, { ...base, cron: options.cron, runAt });
+    }
+    assert("interval" in options && options.interval, "Provide either cron or interval");
+    const intervalMs = intervalToMs(options.interval);
+    const repeatFrom: RepeatFrom = options.repeatFrom ?? "finishedAt";
+    const runAt = firstRunAt ?? new Date();
+    return this.enqueue(payloadOrFunction, { ...base, intervalMs, repeatFrom, runAt });
   }
 
   /**
@@ -389,14 +420,28 @@ export class PrismaQueue<
         this.emit("jobError", outcome.error, job);
       }
 
-      const { key, cron, payload, finishedAt } = job;
-      if (finishedAt && cron && key) {
-        // Schedule next cron
-        debug(
-          `scheduling next cron job({key: ${key}, cron: ${cron}}) with payload=${JSON.stringify(payload)}`,
-        );
+      const { key, cron, intervalMs, repeatFrom, payload, finishedAt } = job;
+      if (finishedAt && key) {
         try {
-          await this.schedule({ key, cron }, payload);
+          if (cron) {
+            debug(
+              `scheduling next cron job({key: ${key}, cron: ${cron}}) with payload=${JSON.stringify(payload)}`,
+            );
+            await this.schedule({ key, cron }, payload);
+          } else if (intervalMs !== null) {
+            const intervalMsNumber = Number(intervalMs);
+            const base = repeatFrom === "runAt" ? job.runAt.getTime() : finishedAt.getTime();
+            const nextRunAt = new Date(base + intervalMsNumber);
+            debug(
+              `scheduling next interval job({key: ${key}, intervalMs: ${intervalMsNumber}, repeatFrom: ${repeatFrom ?? "finishedAt"}}) with payload=${JSON.stringify(payload)}`,
+            );
+            await this.enqueue(payload, {
+              key,
+              intervalMs: intervalMsNumber,
+              repeatFrom: (repeatFrom ?? "finishedAt") as RepeatFrom,
+              runAt: nextRunAt,
+            });
+          }
         } catch (scheduleError) {
           this.emit("error", scheduleError);
         }
