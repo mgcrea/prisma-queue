@@ -136,6 +136,76 @@ describe("PrismaQueue", () => {
       expect(jobs.length).toBe(1);
       expect(jobs[0]?.runAt.getMinutes()).toBe(0);
     });
+    it("should properly schedule a recurring job with an interval", async () => {
+      const before = Date.now();
+      const job = await queue.schedule(
+        { key: "email-interval", interval: { hours: 20 } },
+        { email: "foo@bar.com" },
+      );
+      const record = (await job.fetch())!;
+      expect(record).toBeDefined();
+      expect(record.intervalMs).toBe(BigInt(20 * 60 * 60 * 1000));
+      expect(record.repeatFrom).toBe("finishedAt");
+      expect(record.cron).toBeNull();
+      expect(record.runAt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(record.runAt.getTime()).toBeLessThanOrEqual(Date.now() + 100);
+    });
+    it("should re-enqueue an interval job from finishedAt by default", async () => {
+      await queue.schedule({ key: "email-interval", interval: { seconds: 30 } }, { email: "foo@bar.com" });
+      await waitForNextEvent(queue, "enqueue");
+      const jobs = await prisma.queueJob.findMany({
+        where: { key: "email-interval" },
+        orderBy: { id: "asc" },
+      });
+      expect(jobs.length).toBe(2);
+      const [first, next] = jobs;
+      expect(next?.intervalMs).toBe(BigInt(30_000));
+      expect(next?.repeatFrom).toBe("finishedAt");
+      // next.runAt ≈ first.finishedAt + 30s
+      const expected = first!.finishedAt!.getTime() + 30_000;
+      expect(Math.abs(next!.runAt.getTime() - expected)).toBeLessThan(50);
+    });
+    it("should re-enqueue an interval job from runAt when configured", async () => {
+      const startRunAt = new Date();
+      await queue.schedule(
+        {
+          key: "email-interval-runAt",
+          interval: { seconds: 30 },
+          repeatFrom: "runAt",
+          runAt: startRunAt,
+        },
+        { email: "foo@bar.com" },
+      );
+      await waitForNextEvent(queue, "enqueue");
+      const jobs = await prisma.queueJob.findMany({
+        where: { key: "email-interval-runAt" },
+        orderBy: { id: "asc" },
+      });
+      expect(jobs.length).toBe(2);
+      const next = jobs[1]!;
+      expect(next.repeatFrom).toBe("runAt");
+      // next.runAt = first.runAt + 30s (independent of how long the job took)
+      const expected = startRunAt.getTime() + 30_000;
+      expect(Math.abs(next.runAt.getTime() - expected)).toBeLessThan(50);
+    });
+    it("should reject schedule() with both cron and interval", async () => {
+      await expect(
+        queue.schedule(
+          // @ts-expect-error — discriminated union rejects this at compile time
+          { key: "email-bad", cron: "5 5 * * *", interval: { hours: 1 } },
+          { email: "foo@bar.com" },
+        ),
+      ).rejects.toThrow(/either cron or interval/);
+    });
+    it("should reject schedule() with neither cron nor interval", async () => {
+      await expect(
+        queue.schedule(
+          // @ts-expect-error — discriminated union requires one of cron/interval
+          { key: "email-bad" },
+          { email: "foo@bar.com" },
+        ),
+      ).rejects.toThrow(/either cron or interval/);
+    });
   });
 
   describe("dequeue", () => {
