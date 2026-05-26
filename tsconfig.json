@@ -3,11 +3,10 @@
   "compilerOptions": {
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "baseUrl": ".",
     "paths": {
       "src/*": ["./src/*"],
-      "test/*": ["./test/*"]
-    }
+      "test/*": ["./test/*"],
+    },
   },
-  "include": ["src", "test", "*.config.ts"]
+  "include": ["src", "test", "*.config.ts"],
 }
