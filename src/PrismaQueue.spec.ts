@@ -46,7 +46,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       void queue.start();
     });
     afterEach(() => {
@@ -91,7 +91,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       void queue.start();
     });
     afterEach(() => {
@@ -214,7 +214,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       void queue.start();
     });
     afterEach(() => {
@@ -312,7 +312,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue({ pollInterval: 200 });
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
     });
     afterAll(() => {
       void queue.stop();
@@ -359,7 +359,7 @@ describe("PrismaQueue", () => {
           return delay;
         },
       });
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       queue.worker = vi.fn(async () => {
         throw new Error("always fails");
       });
@@ -375,7 +375,7 @@ describe("PrismaQueue", () => {
         pollInterval: 200,
         retryStrategy: () => null,
       });
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       queue.worker = vi.fn(async () => {
         throw new Error("fails once");
       });
@@ -396,7 +396,7 @@ describe("PrismaQueue", () => {
         queue = createEmailQueue({ deleteOn: "success" });
       });
       beforeEach(async () => {
-        await prisma.queueJob.deleteMany();
+        await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
         void queue.start();
       });
       afterEach(() => {
@@ -422,7 +422,7 @@ describe("PrismaQueue", () => {
         queue = createEmailQueue({ deleteOn: "failure", maxAttempts: 1 });
       });
       beforeEach(async () => {
-        await prisma.queueJob.deleteMany();
+        await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
         void queue.start();
       });
       afterEach(() => {
@@ -450,7 +450,7 @@ describe("PrismaQueue", () => {
             return 50;
           },
         });
-        await prisma.queueJob.deleteMany();
+        await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
         retryQueue.worker = vi.fn(async () => {
           throw new Error("retry me");
         });
@@ -481,7 +481,7 @@ describe("PrismaQueue", () => {
         queue = createEmailQueue({ deleteOn: "always", maxAttempts: 1 });
       });
       beforeEach(async () => {
-        await prisma.queueJob.deleteMany();
+        await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
         void queue.start();
       });
       afterEach(() => {
@@ -521,7 +521,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue({ maxConcurrency: 2 });
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       void queue.start();
     });
     afterEach(() => {
@@ -552,7 +552,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       // void queue.start();
     });
     afterEach(() => {
@@ -593,7 +593,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue();
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       void queue.start();
     });
     afterEach(() => {
@@ -619,7 +619,7 @@ describe("PrismaQueue", () => {
   describe("error events", () => {
     it("should emit jobError for worker failures", async () => {
       const queue = createEmailQueue({ pollInterval: 200 });
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       const jobErrors: { error: unknown; jobId: bigint }[] = [];
       queue.on("jobError", (error, job) => {
         jobErrors.push({ error, jobId: job.id });
@@ -641,7 +641,7 @@ describe("PrismaQueue", () => {
         EmailJobResult | void,
         Client
       >;
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       const successJobs: bigint[] = [];
       queue.on("success", (_result, job) => {
         successJobs.push(job.id);
@@ -658,7 +658,7 @@ describe("PrismaQueue", () => {
     });
     it("should not emit error event for worker failures", async () => {
       const queue = createEmailQueue({ pollInterval: 200 });
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       const systemErrors: unknown[] = [];
       // Replace default error handler
       queue.removeAllListeners("error");
@@ -682,7 +682,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue({ pollInterval: 200 });
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       void queue.start();
     });
     afterEach(() => {
@@ -710,7 +710,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue({ pollInterval: 100, jobInterval: 10 });
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
     });
     afterEach(() => {
       void queue.stop();
@@ -850,7 +850,7 @@ describe("PrismaQueue", () => {
       queue = createEmailQueue({ pollInterval: 100, jobInterval: 10 });
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
     });
     afterEach(async () => {
       await queue.stop();
@@ -981,7 +981,7 @@ describe("PrismaQueue (transactional: false)", () => {
       queue = createEmailQueueNonTransactional();
     });
     beforeEach(async () => {
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       void queue.start();
     });
     afterEach(() => {
@@ -1030,7 +1030,7 @@ describe("PrismaQueue (transactional: false)", () => {
           return 100 * attempts;
         },
       });
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       retryQueue.worker = vi.fn(async () => {
         throw new Error("always fails");
       });
@@ -1052,7 +1052,7 @@ describe("PrismaQueue (transactional: false)", () => {
     });
     it("should work with deleteOn: success", async () => {
       const deleteQueue = createEmailQueueNonTransactional({ deleteOn: "success" });
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       deleteQueue.worker = vi.fn(async () => {
         return { code: "200" };
       });
@@ -1099,7 +1099,7 @@ describe("PrismaQueue (transactional: false)", () => {
     const STALE_QUEUE_NAME = "stale-test-queue";
     it("should recover stuck jobs", async () => {
       const queue = createEmailQueueNonTransactional({ pollInterval: 200, name: STALE_QUEUE_NAME });
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       // Simulate a stuck job: processedAt set, finishedAt null
       const staleDate = new Date(Date.now() - 60_000); // 60 seconds ago
       await prisma.queueJob.create({
@@ -1123,7 +1123,7 @@ describe("PrismaQueue (transactional: false)", () => {
     });
     it("should not requeue recently claimed jobs", async () => {
       const queue = createEmailQueueNonTransactional({ pollInterval: 200, name: STALE_QUEUE_NAME });
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       // Simulate a recently claimed job
       await prisma.queueJob.create({
         data: {
@@ -1143,7 +1143,7 @@ describe("PrismaQueue (transactional: false)", () => {
     const UPGRADE_QUEUE_NAME = "upgrade-test-queue";
     it("should not pick up rows with non-null processedAt", async () => {
       const queue = createEmailQueueNonTransactional({ pollInterval: 100, name: UPGRADE_QUEUE_NAME });
-      await prisma.queueJob.deleteMany();
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
       queue.worker = vi.fn(async () => {
         return { code: "200" };
       });
