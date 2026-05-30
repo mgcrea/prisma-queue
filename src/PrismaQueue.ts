@@ -47,7 +47,8 @@ export type PrismaQueueOptions<C = unknown> = {
   transactional?: boolean;
   /**
    * Lease duration (ms) after which a claimed-but-unfinished job is automatically reclaimed by the
-   * poll loop (non-transactional mode only). Defaults to 30 minutes. Set to `0` or `null` to disable.
+   * poll loop (non-transactional mode only). Defaults to 6 hours — set this above your longest
+   * expected job duration to avoid reclaiming a job mid-flight. Set to `0` or `null` to disable.
    */
   staleTimeout?: number | null;
 };
@@ -104,7 +105,7 @@ const DEFAULT_MAX_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 10 * 1000;
 const DEFAULT_JOB_INTERVAL = 50;
 const DEFAULT_DELETE_ON = "never";
-const DEFAULT_STALE_TIMEOUT = 30 * 60 * 1000;
+const DEFAULT_STALE_TIMEOUT = 6 * 60 * 60 * 1000; // 6 hours — generous so long-running jobs aren't reclaimed mid-flight
 const makeDefaultRetryStrategy =
   (maxDelay: number): RetryStrategy =>
   ({ attempts, maxAttempts }) => {
@@ -131,6 +132,10 @@ export class PrismaQueue<
   #lastReclaimAt = 0;
   /** Resolvers awaiting `concurrency` reaching 0, used by `stop()` to drain without busy-waiting. */
   #drainResolvers: Array<() => void> = [];
+  /** Resolvers for the current idle poll wait, woken early by `enqueue()` for low-latency pickup. */
+  #wakeResolvers: Array<() => void> = [];
+  /** Set when `#wake()` fires with no active idle waiter, so the next idle wait returns immediately. */
+  #pendingWake = false;
 
   /**
    * Constructs a PrismaQueue object with specified options and a worker function.
@@ -196,10 +201,7 @@ export class PrismaQueue<
     });
     this.on("jobError", (error, job) => {
       debug(`Job with id=${job.id} failed for queue named="${this.name}" with error`, error);
-      console.error(
-        `[prisma-queue] job id=${job.id} failed for queue named="${this.name}"`,
-        error,
-      );
+      console.error(`[prisma-queue] job id=${job.id} failed for queue named="${this.name}"`, error);
     });
   }
 
@@ -299,6 +301,8 @@ export class PrismaQueue<
       tableName: this.#escapedTableName,
     });
     this.emit("enqueue", job);
+    // Wake a sleeping poll loop so an immediately-runnable job isn't delayed by the idle interval.
+    this.#wake();
     return job;
   }
 
@@ -405,9 +409,10 @@ export class PrismaQueue<
         // #2 Reclaim stale claimed-but-unfinished jobs on a lease (non-transactional mode only).
         await this.#maybeReclaimStale();
 
-        // Wait for the queue to be ready
+        // Saturated: re-check soon (no DB query here) so the next slot is picked up promptly rather
+        // than after a full pollInterval.
         if (this.concurrency >= maxConcurrency) {
-          await waitFor(pollInterval, this.abortController.signal);
+          await waitFor(jobInterval, this.abortController.signal);
           continue;
         }
 
@@ -440,10 +445,11 @@ export class PrismaQueue<
         }
 
         // Let the just-spawned probes settle, then back off: short while actively draining the
-        // queue, long (pollInterval) when it looks idle (no job found and nothing in flight).
+        // queue, long (pollInterval) when it looks idle (no job found and nothing in flight). The
+        // idle wait is interrupted by `#wake()` so a job enqueued mid-sleep is picked up promptly.
         await waitFor(jobInterval * 2, this.abortController.signal);
         if (!recentlyActive && this.concurrency === 0) {
-          await waitFor(pollInterval, this.abortController.signal);
+          await this.#waitForPoll(pollInterval);
         }
       } catch (error) {
         if (error instanceof AbortError) {
@@ -468,6 +474,62 @@ export class PrismaQueue<
     for (const resolve of resolvers) {
       resolve();
     }
+  }
+
+  /**
+   * Wakes a poll loop currently sleeping out its idle interval so a newly enqueued job is picked up
+   * promptly instead of after a full `pollInterval`. If no idle wait is active, the wake is latched
+   * and consumed by the next idle wait (so an enqueue that races the loop isn't lost).
+   */
+  #wake(): void {
+    if (this.#wakeResolvers.length > 0) {
+      const resolvers = this.#wakeResolvers;
+      this.#wakeResolvers = [];
+      for (const resolve of resolvers) {
+        resolve();
+      }
+    } else {
+      this.#pendingWake = true;
+    }
+  }
+
+  /**
+   * Idle wait used by `poll()`: resolves after `ms`, early on `#wake()`, or rejects with `AbortError`
+   * when the queue is stopped. Consumes a latched wake immediately.
+   */
+  async #waitForPoll(ms: number): Promise<void> {
+    const signal = this.abortController.signal;
+    if (signal.aborted) {
+      throw new AbortError("Aborted");
+    }
+    if (this.#pendingWake) {
+      this.#pendingWake = false;
+      return;
+    }
+    return new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort);
+        const index = this.#wakeResolvers.indexOf(onWake);
+        if (index >= 0) {
+          this.#wakeResolvers.splice(index, 1);
+        }
+      };
+      const onAbort = () => {
+        cleanup();
+        reject(new AbortError("Aborted"));
+      };
+      const onWake = () => {
+        cleanup();
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve();
+      }, ms);
+      this.#wakeResolvers.push(onWake);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   /**
@@ -534,7 +596,9 @@ export class PrismaQueue<
         const next = this.#nextOccurrenceOptions(job);
         if (next) {
           try {
-            debug(`scheduling next occurrence for job({key: ${job.key}}) with payload=${JSON.stringify(next.payload)}`);
+            debug(
+              `scheduling next occurrence for job({key: ${job.key}}) with payload=${JSON.stringify(next.payload)}`,
+            );
             await this.enqueue(next.payload, next.options);
           } catch (scheduleError) {
             this.emit("error", scheduleError);
