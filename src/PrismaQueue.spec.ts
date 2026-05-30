@@ -1177,3 +1177,153 @@ describe("PrismaQueue (transactional: false)", () => {
     });
   });
 });
+
+describe("PrismaQueue (robustness)", () => {
+  beforeEach(async () => {
+    await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
+  });
+
+  describe("maxAttempts enforcement at claim time", () => {
+    const QUEUE_NAME = "claim-cap-queue";
+    it("should fail a job terminally without running it once attempts exceed maxAttempts", async () => {
+      const queue = createEmailQueueNonTransactional({
+        pollInterval: 100,
+        name: QUEUE_NAME,
+        maxAttempts: 2,
+      });
+      const worker = vi.fn(async () => ({ code: "200" }));
+      queue.worker = worker;
+      // A job that already exhausted its budget (e.g. reclaimed repeatedly after hard crashes):
+      // attempts === maxAttempts, so the claim increment pushes it over the cap.
+      const created = await prisma.queueJob.create({
+        data: {
+          queue: QUEUE_NAME,
+          payload: { email: "poison@test.com" },
+          attempts: 2,
+          maxAttempts: 2,
+          runAt: new Date(),
+        },
+      });
+      void queue.start();
+      await waitForNextJob(queue); // dequeue/jobError still emit for the finalized job
+      await queue.stop();
+      expect(worker).not.toHaveBeenCalled();
+      const record = await prisma.queueJob.findUnique({ where: { id: created.id } });
+      expect(record?.finishedAt).toBeInstanceOf(Date);
+      expect(record?.failedAt).toBeInstanceOf(Date);
+      expect(record?.error).toBeTruthy();
+    });
+  });
+
+  describe("auto-reclaim lease", () => {
+    it("should reclaim and process a stale claimed job without manual requeueStale", async () => {
+      const QUEUE_NAME = "lease-queue";
+      const queue = createEmailQueueNonTransactional({
+        pollInterval: 100,
+        name: QUEUE_NAME,
+        staleTimeout: 1000,
+      });
+      const worker = vi.fn(async () => ({ code: "200" }));
+      queue.worker = worker;
+      // Stale claim: processedAt well older than the lease, finishedAt null.
+      const staleDate = new Date(Date.now() - 10_000);
+      const created = await prisma.queueJob.create({
+        data: {
+          queue: QUEUE_NAME,
+          payload: { email: "stuck@test.com" },
+          processedAt: staleDate,
+          attempts: 1,
+          runAt: staleDate,
+        },
+      });
+      void queue.start();
+      await waitForNextJob(queue);
+      await queue.stop();
+      expect(worker).toHaveBeenCalledTimes(1);
+      const record = await prisma.queueJob.findUnique({ where: { id: created.id } });
+      expect(record?.finishedAt).toBeInstanceOf(Date);
+    });
+    it("should ignore staleTimeout in transactional mode", async () => {
+      const QUEUE_NAME = "lease-txn-queue";
+      const queue = createEmailQueue({ pollInterval: 100, name: QUEUE_NAME, staleTimeout: 1000 });
+      const worker = vi.fn(async () => ({ code: "200" }));
+      queue.worker = worker;
+      const staleDate = new Date(Date.now() - 10_000);
+      await prisma.queueJob.create({
+        data: {
+          queue: QUEUE_NAME,
+          payload: { email: "stuck@test.com" },
+          processedAt: staleDate,
+          attempts: 1,
+          runAt: staleDate,
+        },
+      });
+      void queue.start();
+      await waitFor(500);
+      await queue.stop();
+      // The claimed row is left untouched — transactional crashes roll back the claim, so there is
+      // nothing to reclaim and the lease is a no-op here.
+      expect(worker).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("idempotent reschedule", () => {
+    it("should atomically enqueue exactly one next occurrence for an interval job", async () => {
+      const QUEUE_NAME = "reschedule-queue";
+      const queue = createEmailQueue({ pollInterval: 100, name: QUEUE_NAME });
+      queue.worker = vi.fn(async () => ({ code: "200" }));
+      await queue.schedule({ key: "tick", interval: { seconds: 60 } }, { email: "tick@test.com" });
+      // Listen for the reschedule (the initial schedule's enqueue already fired above).
+      const rescheduled = waitForNextEvent(queue, "enqueue");
+      void queue.start();
+      await waitForNextJob(queue);
+      await rescheduled;
+      await queue.stop();
+      // Exactly one pending future occurrence should exist for the key (no duplicate, no gap).
+      const pending = await prisma.queueJob.findMany({
+        where: { queue: QUEUE_NAME, key: "tick", finishedAt: null },
+      });
+      expect(pending.length).toBe(1);
+    });
+  });
+
+  describe("loud failures", () => {
+    it("should log to console.error by default on worker failure", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const queue = createEmailQueue({ pollInterval: 100, name: "loud-queue" });
+        queue.worker = vi.fn(async () => {
+          throw new Error("boom");
+        });
+        await queue.enqueue({ email: "loud@test.com" });
+        void queue.start();
+        await waitForNextJob(queue);
+        await queue.stop();
+        expect(consoleSpy).toHaveBeenCalled();
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    });
+  });
+
+  describe("stop() draining", () => {
+    it("should resolve promptly once the in-flight job finishes", async () => {
+      const queue = createEmailQueue({ pollInterval: 100, jobInterval: 10, name: "drain-queue" });
+      let completed = false;
+      queue.worker = vi.fn(async () => {
+        await waitFor(250);
+        completed = true;
+        return { code: "200" };
+      });
+      await queue.enqueue({ email: "drain@test.com" });
+      void queue.start();
+      await waitFor(120); // let the job start
+      const startTime = Date.now();
+      await queue.stop({ timeout: 5000 });
+      const duration = Date.now() - startTime;
+      expect(completed).toBe(true);
+      // Drains as soon as the ~250ms job finishes — nowhere near the 5s timeout.
+      expect(duration).toBeLessThan(1000);
+    }, 10000);
+  });
+});
