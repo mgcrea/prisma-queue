@@ -83,7 +83,7 @@ export const emailQueue = createQueue<JobPayload, JobResult, typeof prisma>(
 );
 ```
 
-> **Note**: The `client` parameter in the worker is a transaction-scoped client (in the default transactional mode) with full typed access to your Prisma models. TypeScript infers the client type from the `prisma` option you pass.
+> **Note**: By default the `client` parameter in the worker is the full `PrismaClient` (at-least-once semantics, `$transaction` available) with full typed access to your Prisma models. Pass `transactional: true` to instead run the worker inside the dequeue transaction with a transaction-scoped client (exactly-once). TypeScript infers the client type from the `prisma` option you pass.
 
 - Queue a job
 
@@ -145,9 +145,10 @@ main();
 | `jobInterval` | `number` | `50` | Delay between job dispatches in ms |
 | `tableName` | `string` | `"queue_jobs"` | Database table name (must match `@@map` in your schema) |
 | `deleteOn` | `"success" \| "failure" \| "always" \| "never"` | `"never"` | When to delete completed jobs |
-| `transactionTimeout` | `number` | `1800000` | Transaction timeout in ms (30 min) |
+| `transactionTimeout` | `number` | `1800000` | Transaction timeout in ms (30 min), transactional mode only |
+| `transactionWarningTimeout` | `number \| null` | `transactionTimeout / 2` | Warn if a transactional worker holds its transaction longer than this (ms); `0`/`null` disables |
 | `retryStrategy` | `RetryStrategy` | Exponential backoff | Custom retry logic |
-| `transactional` | `boolean` | `true` | Run worker inside the dequeue transaction |
+| `transactional` | `boolean` | `false` | Run worker inside the dequeue transaction (exactly-once); default is at-least-once |
 
 ### Events
 
@@ -263,15 +264,17 @@ const queue = createQueue<JobPayload, JobResult, typeof prisma>(
 );
 ```
 
-### Non-Transactional Mode
+### Execution Modes
 
-By default, the worker runs inside the dequeue transaction (exactly-once semantics). Set `transactional: false` to run the worker outside the transaction, giving it access to the full `PrismaClient` with `$transaction` support (at-least-once semantics):
+> **Migrating from v2**: v2 defaulted to `transactional: true` (exactly-once, worker inside the dequeue transaction). v3 flips the default to `transactional: false` (at-least-once) — the conventional job-queue behavior and the same as v1.x. To keep v2 behavior, pass `transactional: true` explicitly. Note that under `transactional: true` the worker receives a transaction-scoped client (no `$transaction`); under the new default it receives the full `PrismaClient`.
+
+By **default** (`transactional: false`) the worker runs **outside** the dequeue transaction with access to the full `PrismaClient` (including `$transaction`). The job is claimed atomically, then the worker runs on its own — **at-least-once** semantics. This is the right mode for most jobs, and the only safe mode for long-running workers or workers that use a separate connection (e.g. `worker_threads` or external services), since those cannot use a transaction-scoped client.
 
 ```ts
-import { createQueue, type JobWorkerWithClient } from "@mgcrea/prisma-queue";
+import { createQueue } from "@mgcrea/prisma-queue";
 
 const queue = createQueue<JobPayload, JobResult, typeof prisma>(
-  { prisma, name: "email", transactional: false },
+  { prisma, name: "email" }, // transactional: false is the default
   async (job, client) => {
     // client is the full PrismaClient — $transaction is available
     await client.$transaction(async (tx) => {
@@ -283,7 +286,7 @@ const queue = createQueue<JobPayload, JobResult, typeof prisma>(
 );
 ```
 
-**Trade-offs**: In non-transactional mode, a process crash between claiming and completing a job can leave it "stuck" (`processedAt` set, `finishedAt` null). Use `requeueStale()` to recover:
+**Trade-offs**: In the default (non-transactional) mode, a process crash between claiming and completing a job can leave it "stuck" (`processedAt` set, `finishedAt` null). The queue auto-reclaims such jobs after `staleTimeout`; you can also recover them manually with `requeueStale()`:
 
 ```ts
 // Requeue jobs claimed more than 5 minutes ago that never completed
@@ -292,11 +295,32 @@ const count = await queue.requeueStale({ olderThanMs: 5 * 60 * 1000 });
 
 Note: `isLocked()` returns `false` during worker execution in non-transactional mode since the row lock is released after claiming.
 
+#### Transactional Mode (exactly-once)
+
+Pass `transactional: true` to run the worker **inside** the dequeue transaction. The worker receives a transaction-scoped client and its work commits atomically with the job's completion — **exactly-once** semantics:
+
+```ts
+import { createQueue, type JobWorker } from "@mgcrea/prisma-queue";
+
+const queue = createQueue<JobPayload, JobResult, typeof prisma>(
+  { prisma, name: "email", transactional: true },
+  async (job, client) => {
+    // client is transaction-scoped — no $transaction, no separate connections
+    await client.user.update({ where: { id: 1 }, data: { email: job.payload.email } });
+    return { status: 200 };
+  },
+);
+```
+
+> **Warning**: Transactional mode holds a `FOR UPDATE SKIP LOCKED` row lock and the transaction open for the **entire** worker duration (up to `transactionTimeout`, default 30 min). Do **not** use it for long-running workers, or workers that do their real work on a separate connection (`worker_threads`, external services) — they cannot use the transaction-scoped client, yet the held transaction can hit `transactionTimeout` (or starve the connection pool) and roll back the claim, causing the job to be re-dequeued and re-run. As a guardrail, the queue logs a warning when a transactional worker holds its transaction longer than `transactionWarningTimeout` (default 50% of `transactionTimeout`). For these workloads use the default `transactional: false`.
+
 ### Threading
 
 You can easily spin of your workers in separate threads using [worker_threads](https://nodejs.org/api/worker_threads.html#worker-threads) (Node.js >= 12.17.0).
 
 It enables you to fully leverage your CPU cores and isolate your main application queue from potential memory leaks or crashes.
+
+> **Important**: Threaded workers must use the default `transactional: false` mode. A transaction-scoped client cannot cross a thread boundary, so the work would run on a separate connection while the dequeue transaction sits open holding a row lock — risking a `transactionTimeout` rollback and a re-run loop. The default mode (at-least-once) is exactly what threaded workers want; pair it with idempotent workers and `requeueStale()`/`staleTimeout` for crash recovery.
 
 ```ts
 import { JobPayload, JobResult, PrismaJob } from "@mgcrea/prisma-queue";
