@@ -29,8 +29,16 @@ export const waitFor = async (ms: number, signal?: AbortSignal): Promise<void> =
     }
   });
 
-export const calculateDelay = (attempts: number): number =>
-  Math.min(1000 * Math.pow(2, Math.max(1, attempts)) + Math.random() * 100, Math.pow(2, 31) - 1);
+/** The maximum delay (ms) representable by a single `setTimeout` call. */
+export const MAX_TIMEOUT_DELAY = Math.pow(2, 31) - 1;
+
+/**
+ * Computes an exponential-backoff delay (with jitter) for a given attempt count.
+ * @param attempts - The number of attempts already made.
+ * @param maxDelay - Optional ceiling for the returned delay. Defaults to the `setTimeout` max.
+ */
+export const calculateDelay = (attempts: number, maxDelay: number = MAX_TIMEOUT_DELAY): number =>
+  Math.min(1000 * Math.pow(2, Math.max(1, attempts)) + Math.random() * 100, maxDelay, MAX_TIMEOUT_DELAY);
 
 export const intervalToMs = (interval: IntervalDuration): number => {
   const { seconds = 0, minutes = 0, hours = 0, days = 0 } = interval;
