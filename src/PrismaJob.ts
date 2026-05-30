@@ -118,6 +118,14 @@ export class PrismaJob<Payload, Result> {
   }
 
   /**
+   * Gets the timestamp when the job was permanently dead-lettered (gave up after exhausting attempts),
+   * or null if it has not been dead-lettered.
+   */
+  public get deadLetteredAt() {
+    return this.#record.deadLetteredAt;
+  }
+
+  /**
    * Gets the error record if the job failed.
    */
   public get error() {

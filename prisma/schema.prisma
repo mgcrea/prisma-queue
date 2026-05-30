@@ -2,8 +2,9 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client"
-  output   = "./client"
+  provider        = "prisma-client"
+  output          = "./client"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -24,15 +25,18 @@ model QueueJob {
   priority    Int       @default(0)
   attempts    Int       @default(0)
   maxAttempts Int?
-  runAt       DateTime  @default(now())
-  notBefore   DateTime?
-  finishedAt  DateTime?
-  processedAt DateTime?
-  failedAt    DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  runAt        DateTime  @default(now())
+  notBefore    DateTime?
+  finishedAt   DateTime?
+  processedAt  DateTime?
+  failedAt     DateTime?
+  deadLetteredAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@unique([queue, key, runAt])
-  @@index([queue, finishedAt, processedAt, priority, runAt])
+  // Partial index for the dequeue hot path: only un-finished rows are indexed, so it stays small and
+  // carries no dead rows. Requires the `partialIndexes` preview feature (Prisma 7.4+).
+  @@index([queue, processedAt, priority, runAt], where: raw("\"finishedAt\" IS NULL"))
   @@map("queue_jobs")
 }

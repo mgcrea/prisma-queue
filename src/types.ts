@@ -36,6 +36,7 @@ export type QueueJobRecord = {
   finishedAt: Date | null;
   processedAt: Date | null;
   failedAt: Date | null;
+  deadLetteredAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
