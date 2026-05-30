@@ -1,4 +1,4 @@
-import type { PrismaQueue } from "src/index";
+import { createQueue, type PrismaQueue } from "src/index";
 import { PrismaJob } from "src/PrismaJob";
 import { debug, serializeError, waitFor } from "src/utils";
 import {
@@ -1325,5 +1325,65 @@ describe("PrismaQueue (robustness)", () => {
       // Drains as soon as the ~250ms job finishes — nowhere near the 5s timeout.
       expect(duration).toBeLessThan(1000);
     }, 10000);
+  });
+
+  describe("default mode", () => {
+    it("should default to non-transactional, passing the full PrismaClient to the worker", async () => {
+      // No `transactional` option → at-least-once default; the worker receives the full client.
+      const queue = createQueue<{ email: string }, { code: string }, typeof prisma>(
+        { prisma, name: "default-mode-queue", pollInterval: 100 },
+        async (_job, client) => {
+          // The full client exposes `$transaction`; a transaction-scoped client would not.
+          expect(typeof client.$transaction).toBe("function");
+          return { code: "200" };
+        },
+      );
+      await queue.enqueue({ email: "default@test.com" });
+      void queue.start();
+      await waitForNextJob(queue);
+      await queue.stop();
+    });
+  });
+
+  describe("slow transaction warning", () => {
+    it("should warn when a transactional worker holds the transaction longer than the threshold", async () => {
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const queue = createEmailQueue({
+          pollInterval: 100,
+          name: "slow-txn-queue",
+          transactionWarningTimeout: 100,
+        });
+        queue.worker = vi.fn(async () => {
+          await waitFor(300);
+          return { code: "200" };
+        });
+        await queue.enqueue({ email: "slow@test.com" });
+        void queue.start();
+        await waitForNextJob(queue);
+        await queue.stop();
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("transactional: false"));
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    });
+    it("should not warn when a transactional worker finishes before the threshold", async () => {
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const queue = createEmailQueue({
+          pollInterval: 100,
+          name: "fast-txn-queue",
+          transactionWarningTimeout: 1000,
+        });
+        queue.worker = vi.fn(async () => ({ code: "200" }));
+        await queue.enqueue({ email: "fast@test.com" });
+        void queue.start();
+        await waitForNextJob(queue);
+        await queue.stop();
+        expect(consoleSpy).not.toHaveBeenCalled();
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    });
   });
 });
