@@ -13,7 +13,7 @@ export const DEFAULT_POLL_INTERVAL = 500;
 let globalQueueIndex = 0;
 
 export const createEmailQueue = (
-  options: Omit<PrismaQueueOptions<Client>, "prisma"> = {},
+  options: Omit<PrismaQueueOptions<Client>, "prisma" | "transactional"> = {},
   worker: JobWorker<EmailJobPayload, EmailJobResult, Client> = async (_job) => {
     return { code: "200" };
   },
@@ -29,6 +29,7 @@ export const createEmailQueue = (
       prisma,
       name,
       pollInterval,
+      transactional: true,
       ...otherOptions,
     },
     worker,

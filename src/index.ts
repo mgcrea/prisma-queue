@@ -10,17 +10,21 @@ export { prepareForJson, restoreFromJson } from "./utils";
 /**
  * Factory function to create a new PrismaQueue instance.
  *
+ * By default (`transactional: false`) the worker receives the full `PrismaClient` and runs outside
+ * the dequeue transaction (at-least-once). Pass `transactional: true` to run the worker inside the
+ * dequeue transaction (exactly-once) with a transaction-scoped client.
+ *
  * @param options - Configuration options for the queue.
  * @param worker - The worker function that processes each job.
  * @returns An instance of PrismaQueue configured with the provided options and worker.
  */
 export function createQueue<T extends JobPayload = JobPayload, U extends JobResult = JobResult, C = unknown>(
-  options: PrismaQueueOptions<C> & { transactional: false },
-  worker: JobWorkerWithClient<T, U, C>,
+  options: PrismaQueueOptions<C> & { transactional: true },
+  worker: JobWorker<T, U, C>,
 ): PrismaQueue<T, U, C>;
 export function createQueue<T extends JobPayload = JobPayload, U extends JobResult = JobResult, C = unknown>(
   options: PrismaQueueOptions<C>,
-  worker: JobWorker<T, U, C>,
+  worker: JobWorkerWithClient<T, U, C>,
 ): PrismaQueue<T, U, C>;
 export function createQueue<T extends JobPayload = JobPayload, U extends JobResult = JobResult, C = unknown>(
   options: PrismaQueueOptions<C>,

@@ -31,6 +31,10 @@ import {
 export type PrismaQueueOptions<C = unknown> = {
   prisma: C;
   name?: string;
+  /**
+   * Maximum number of attempts before a job is permanently dead-lettered. Defaults to 5. Set to
+   * `null` for unlimited retries (relying on a custom `retryStrategy` to stop).
+   */
   maxAttempts?: number | null;
   maxConcurrency?: number;
   pollInterval?: number;
@@ -39,11 +43,23 @@ export type PrismaQueueOptions<C = unknown> = {
   deleteOn?: "success" | "failure" | "always" | "never";
   /** Transaction timeout in milliseconds for job processing. Defaults to 30 minutes. */
   transactionTimeout?: number;
+  /**
+   * In transactional mode, emit a warning if a worker holds its dequeue transaction longer than
+   * this many ms — a sign the worker is long-running or uses a separate connection
+   * (worker_threads, external services) and should likely use `transactional: false`. Defaults to
+   * 50% of `transactionTimeout`. Set to `0`/`null` to disable.
+   */
+  transactionWarningTimeout?: number | null;
   /** Custom retry strategy. Returns delay in ms, or null to stop retrying. */
   retryStrategy?: RetryStrategy;
   /** Ceiling (ms) for the default retry strategy's backoff delay. Defaults to the `setTimeout` max. */
   maxRetryDelay?: number;
-  /** Whether to run the worker inside the dequeue transaction. Defaults to true. */
+  /**
+   * Whether to run the worker inside the dequeue transaction. Defaults to false (at-least-once).
+   * Set `true` to run the worker inside the dequeue transaction (exactly-once) — note this holds a
+   * row lock and the transaction open for the entire worker duration, so it is unsuitable for
+   * long-running workers or workers using a separate connection (worker_threads, external services).
+   */
   transactional?: boolean;
   /**
    * Lease duration (ms) after which a claimed-but-unfinished job is automatically reclaimed by the
@@ -77,13 +93,22 @@ export type ScheduleOptions =
 type DequeueOutcome<T extends JobPayload, U extends JobResult> =
   | { job: PrismaJob<T, U> | null; status: "none" }
   | { job: PrismaJob<T, U>; status: "success"; result: U; rescheduled?: DatabaseJob<T, U> }
-  | { job: PrismaJob<T, U>; status: "error"; error: unknown; rescheduled?: DatabaseJob<T, U> };
+  | {
+      job: PrismaJob<T, U>;
+      status: "error";
+      error: unknown;
+      /** True when this failure was terminal (no more retries) and the job was dead-lettered. */
+      deadLettered?: boolean;
+      rescheduled?: DatabaseJob<T, U>;
+    };
 
 export type PrismaQueueEvents<T extends JobPayload = JobPayload, U extends JobResult = JobResult> = {
   enqueue: (job: PrismaJob<T, U>) => void;
   dequeue: (job: PrismaJob<T, U>) => void;
   success: (result: U, job: PrismaJob<T, U>) => void;
   jobError: (error: unknown, job: PrismaJob<T, U>) => void;
+  /** Emitted once when a job is permanently dead-lettered after exhausting its attempts. */
+  dead: (error: unknown, job: PrismaJob<T, U>) => void;
   error: (error: unknown) => void;
 };
 
@@ -105,6 +130,7 @@ const DEFAULT_MAX_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 10 * 1000;
 const DEFAULT_JOB_INTERVAL = 50;
 const DEFAULT_DELETE_ON = "never";
+const DEFAULT_MAX_ATTEMPTS = 5; // finite by default so a poison job dead-letters instead of retrying forever
 const DEFAULT_STALE_TIMEOUT = 6 * 60 * 60 * 1000; // 6 hours — generous so long-running jobs aren't reclaimed mid-flight
 const makeDefaultRetryStrategy =
   (maxDelay: number): RetryStrategy =>
@@ -153,15 +179,16 @@ export class PrismaQueue<
       prisma,
       name = "default",
       tableName = "queue_jobs",
-      maxAttempts = null,
+      maxAttempts = DEFAULT_MAX_ATTEMPTS,
       maxConcurrency = DEFAULT_MAX_CONCURRENCY,
       pollInterval = DEFAULT_POLL_INTERVAL,
       jobInterval = DEFAULT_JOB_INTERVAL,
       deleteOn = DEFAULT_DELETE_ON,
       transactionTimeout = 30 * 60 * 1000,
+      transactionWarningTimeout = Math.floor(transactionTimeout / 2),
       maxRetryDelay = MAX_TIMEOUT_DELAY,
       retryStrategy = makeDefaultRetryStrategy(maxRetryDelay),
-      transactional = true,
+      transactional = false,
       staleTimeout = DEFAULT_STALE_TIMEOUT,
     } = this.options;
 
@@ -185,6 +212,7 @@ export class PrismaQueue<
       jobInterval,
       deleteOn,
       transactionTimeout,
+      transactionWarningTimeout,
       maxRetryDelay,
       retryStrategy,
       transactional,
@@ -555,6 +583,26 @@ export class PrismaQueue<
   }
 
   /**
+   * In transactional mode, schedules a one-shot warning if the worker holds its dequeue transaction
+   * longer than `transactionWarningTimeout`. A long hold (often a worker using a separate connection
+   * — worker_threads, external services — or simply a long-running job) risks hitting
+   * `transactionTimeout` and rolling back the claim, causing the job to be re-dequeued and re-run.
+   * Such workers should use `transactional: false`. Returns the timer handle to clear, or `undefined`
+   * when the warning is disabled (`0`/`null`).
+   */
+  #startSlowTransactionWarning(jobId: DatabaseJob<T, U>["id"]): ReturnType<typeof setTimeout> | undefined {
+    const { transactionWarningTimeout, transactionTimeout } = this.config;
+    if (!transactionWarningTimeout || transactionWarningTimeout <= 0) {
+      return undefined;
+    }
+    return setTimeout(() => {
+      console.warn(
+        `[prisma-queue] transactional worker for job id=${jobId} on queue named="${this.name}" has held its dequeue transaction for ${transactionWarningTimeout}ms (transactionTimeout=${transactionTimeout}ms). Long-running workers, or workers that use a separate connection (worker_threads, external services), should use { transactional: false }.`,
+      );
+    }, transactionWarningTimeout);
+  }
+
+  /**
    * Dequeues and processes the next job in the queue. Dispatches to transactional or
    * non-transactional path based on configuration, then emits events and handles cron scheduling.
    * @returns {Promise<PrismaJob<T, U> | null>} The job that was processed or null if no job was available.
@@ -577,6 +625,10 @@ export class PrismaQueue<
         this.emit("success", outcome.result, job);
       } else if (outcome.status === "error") {
         this.emit("jobError", outcome.error, job);
+        // Distinct signal for permanent failures, so dead-letters can be alerted on separately.
+        if (outcome.deadLettered) {
+          this.emit("dead", outcome.error, job);
+        }
       }
 
       // In transactional mode the next occurrence was already enqueued atomically inside the
@@ -655,6 +707,7 @@ export class PrismaQueue<
     await job.update({
       finishedAt: date,
       failedAt: date,
+      deadLetteredAt: date,
       error: serializeError(error),
       notBefore: null,
     });
@@ -710,11 +763,13 @@ export class PrismaQueue<
         // effectively a no-op there — by design, not a bug.
         if (maxAttempts !== null && attempts > maxAttempts) {
           const error = await this.#finalizeExhausted(job, maxAttempts);
-          outcome = { job, status: "error", error };
+          outcome = { job, status: "error", error, deadLettered: true };
         } else {
+          const warnTimer = this.#startSlowTransactionWarning(id);
           try {
             debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
             const result = await worker(job, client);
+            clearTimeout(warnTimer);
             debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
             const date = new Date();
             await job.update({ finishedAt: date, progress: 100, result, error: null });
@@ -723,6 +778,7 @@ export class PrismaQueue<
             }
             outcome = { job, status: "success", result };
           } catch (error) {
+            clearTimeout(warnTimer);
             const date = new Date();
             debug(
               `failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${String(error)}"`,
@@ -743,6 +799,7 @@ export class PrismaQueue<
               await job.update({
                 finishedAt: date,
                 failedAt: date,
+                deadLetteredAt: date,
                 error: serializeError(error),
                 notBefore: null,
               });
@@ -751,7 +808,7 @@ export class PrismaQueue<
             if (isFinished && (deleteOn === "failure" || deleteOn === "always")) {
               await job.delete();
             }
-            outcome = { job, status: "error", error };
+            outcome = { job, status: "error", error, deadLettered: isFinished };
           }
         }
         // #3 Enqueue the next occurrence inside the same transaction so completion and the next
@@ -815,7 +872,7 @@ export class PrismaQueue<
     // hard-crashed the runtime, so the catch below never ran) is failed terminally without running.
     if (maxAttempts !== null && attempts > maxAttempts) {
       const error = await this.#finalizeExhausted(job, maxAttempts);
-      return { job, status: "error", error };
+      return { job, status: "error", error, deadLettered: true };
     }
 
     // Phase 2: Run worker outside any transaction
@@ -853,6 +910,7 @@ export class PrismaQueue<
         await job.update({
           finishedAt: date,
           failedAt: date,
+          deadLetteredAt: date,
           error: serializeError(error),
           notBefore: null,
         });
@@ -861,7 +919,7 @@ export class PrismaQueue<
       if (isFinished && (deleteOn === "failure" || deleteOn === "always")) {
         await job.delete();
       }
-      return { job, status: "error", error };
+      return { job, status: "error", error, deadLettered: isFinished };
     }
   }
 
@@ -881,6 +939,28 @@ export class PrismaQueue<
       },
       data: { processedAt: null },
     });
+    return count;
+  }
+
+  /**
+   * Deletes completed jobs (those with `finishedAt` set) older than the cutoff, for table retention.
+   * The dequeue hot path filters `finishedAt IS NULL`, so purging finished rows keeps the working set
+   * (and the index) small without affecting pending work.
+   * @param options.olderThanMs - Only delete jobs finished more than this many milliseconds ago.
+   * @param options.deadLetteredOnly - When true, only delete dead-lettered jobs (keep successes).
+   * @returns The number of jobs deleted.
+   */
+  public async purge(options: { olderThanMs: number; deadLetteredOnly?: boolean }): Promise<number> {
+    const { olderThanMs, deadLetteredOnly = false } = options;
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const where: Record<string, unknown> = {
+      queue: this.name,
+      finishedAt: { lte: cutoff },
+    };
+    if (deadLetteredOnly) {
+      where["deadLetteredAt"] = { not: null };
+    }
+    const { count } = await this.model.deleteMany({ where });
     return count;
   }
 
