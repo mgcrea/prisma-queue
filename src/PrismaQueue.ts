@@ -40,7 +40,13 @@ export type PrismaQueueOptions<C = unknown> = {
   pollInterval?: number;
   jobInterval?: number;
   tableName?: string;
-  deleteOn?: "success" | "failure" | "always" | "never";
+  /**
+   * When to delete a job row after it completes. `"success"` deletes successful jobs (dead-letters
+   * retained); `"always"` deletes successes *and* dead-letters — an explicit opt-out of DLQ
+   * retention; `"never"` (default) keeps everything. Under `"never"`/`"success"` the dead-letter
+   * queue stays inspectable; use `purge()` to prune dead-letters deliberately.
+   */
+  deleteOn?: "success" | "always" | "never";
   /** Transaction timeout in milliseconds for job processing. Defaults to 30 minutes. */
   transactionTimeout?: number;
   /**
@@ -67,6 +73,14 @@ export type PrismaQueueOptions<C = unknown> = {
    * expected job duration to avoid reclaiming a job mid-flight. Set to `0` or `null` to disable.
    */
   staleTimeout?: number | null;
+  /**
+   * Per-job wall-clock timeout (ms) for non-transactional mode. When exceeded, the job's `signal` is
+   * aborted (cooperative cancellation) and the attempt fails with a timeout error (retried or
+   * dead-lettered as usual). Defaults to `null` (disabled). In transactional mode use
+   * `transactionTimeout` instead. Note: a non-cooperative worker keeps running in the background; the
+   * signal is the only way to actually stop it.
+   */
+  jobTimeout?: number | null;
 };
 
 export type EnqueueOptions = {
@@ -190,6 +204,7 @@ export class PrismaQueue<
       retryStrategy = makeDefaultRetryStrategy(maxRetryDelay),
       transactional = false,
       staleTimeout = DEFAULT_STALE_TIMEOUT,
+      jobTimeout = null,
     } = this.options;
 
     assert(prisma && typeof prisma === "object", "prisma option is required");
@@ -217,6 +232,7 @@ export class PrismaQueue<
       retryStrategy,
       transactional,
       staleTimeout,
+      jobTimeout,
     };
 
     // Default error handlers — loud by default so failures are visible without DEBUG.
@@ -332,6 +348,38 @@ export class PrismaQueue<
     // Wake a sleeping poll loop so an immediately-runnable job isn't delayed by the idle interval.
     this.#wake();
     return job;
+  }
+
+  /**
+   * Bulk-inserts many jobs in a single `createMany` for high-throughput producers — far cheaper than
+   * one `enqueue` (and one transaction) per job. Intended for plain, non-recurring jobs: keyed/cron/
+   * interval scheduling and per-job payload functions are not supported here (use `enqueue`). Does
+   * not emit per-job `enqueue` events. Returns the number of jobs inserted.
+   * @param payloads - The job payloads to insert.
+   * @param options - Shared options applied to every job (maxAttempts, priority, runAt).
+   */
+  public async enqueueMany(
+    payloads: T[],
+    options: Pick<EnqueueOptions, "maxAttempts" | "priority" | "runAt"> = {},
+  ): Promise<number> {
+    if (payloads.length === 0) {
+      return 0;
+    }
+    const { maxAttempts = this.config.maxAttempts, priority = 0, runAt } = options;
+    const now = new Date();
+    const data = payloads.map((payload) => ({
+      queue: this.name,
+      payload,
+      maxAttempts,
+      priority,
+      createdAt: now,
+      runAt: runAt ?? now,
+    }));
+    const { count } = await this.model.createMany({ data });
+    debug(`enqueued ${count} jobs in bulk to queue named="${this.name}"`);
+    // Wake a sleeping poll loop so immediately-runnable jobs aren't delayed by the idle interval.
+    this.#wake();
+    return count;
   }
 
   /**
@@ -583,6 +631,47 @@ export class PrismaQueue<
   }
 
   /**
+   * Creates an AbortController for a single job, linked to the queue-wide controller so the job's
+   * `signal` aborts both on `stop()` and on a per-job timeout. Returns the controller and a cleanup
+   * to detach the link once the job settles.
+   */
+  #createJobAbort(): { controller: AbortController; cleanup: () => void } {
+    const controller = new AbortController();
+    const queueSignal = this.abortController.signal;
+    if (queueSignal.aborted) {
+      controller.abort();
+      return { controller, cleanup: () => {} };
+    }
+    const onQueueAbort = () => controller.abort();
+    queueSignal.addEventListener("abort", onQueueAbort, { once: true });
+    return { controller, cleanup: () => queueSignal.removeEventListener("abort", onQueueAbort) };
+  }
+
+  /**
+   * Runs `run()` with the per-job `jobTimeout` (non-transactional mode). On timeout, aborts the job's
+   * `controller` (so a cooperative worker watching `job.signal` can stop) and rejects with a timeout
+   * error so the attempt is retried/dead-lettered. With no timeout configured, runs `run()` directly.
+   */
+  async #runWithJobTimeout(run: () => Promise<U>, controller: AbortController, jobId: bigint): Promise<U> {
+    const { jobTimeout } = this.config;
+    if (!jobTimeout || jobTimeout <= 0) {
+      return run();
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error(`Job ${jobId} exceeded jobTimeout (${jobTimeout}ms)`));
+      }, jobTimeout);
+    });
+    try {
+      return await Promise.race([run(), timedOut]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
    * In transactional mode, schedules a one-shot warning if the worker holds its dequeue transaction
    * longer than `transactionWarningTimeout`. A long hold (often a worker using a separate connection
    * — worker_threads, external services — or simply a long-running job) risks hitting
@@ -711,7 +800,9 @@ export class PrismaQueue<
       error: serializeError(error),
       notBefore: null,
     });
-    if (this.config.deleteOn === "failure" || this.config.deleteOn === "always") {
+    // Dead-letters are retained by default so the DLQ stays inspectable; only `deleteOn: "always"`
+    // (an explicit opt-out) removes them. Use `purge({ deadLetteredOnly: true })` to prune otherwise.
+    if (this.config.deleteOn === "always") {
       await job.delete();
     }
     return error;
@@ -804,8 +895,8 @@ export class PrismaQueue<
                 notBefore: null,
               });
             }
-            // Only delete on terminal failure — otherwise the retry update is wasted.
-            if (isFinished && (deleteOn === "failure" || deleteOn === "always")) {
+            // Terminal failures become dead-letters: retained for inspection unless deleteOn:"always".
+            if (isFinished && deleteOn === "always") {
               await job.delete();
             }
             outcome = { job, status: "error", error, deadLettered: isFinished };
@@ -861,24 +952,27 @@ export class PrismaQueue<
     }
 
     const { id, payload, attempts, maxAttempts } = rows[0];
+    // Per-job abort signal: aborts on stop() or on the per-job timeout below.
+    const { controller, cleanup } = this.#createJobAbort();
     const job = new PrismaJob<T, U>(rows[0], {
       model: this.model,
       client: this.#prisma,
       tableName,
-      signal: this.abortController.signal,
+      signal: controller.signal,
     });
 
     // #1 Claim-time enforcement: a job reclaimed by the lease past its budget (e.g. a worker that
     // hard-crashed the runtime, so the catch below never ran) is failed terminally without running.
     if (maxAttempts !== null && attempts > maxAttempts) {
+      cleanup();
       const error = await this.#finalizeExhausted(job, maxAttempts);
       return { job, status: "error", error, deadLettered: true };
     }
 
-    // Phase 2: Run worker outside any transaction
+    // Phase 2: Run worker outside any transaction, bounded by the optional jobTimeout.
     try {
       debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
-      const result = await worker(job, this.#prisma);
+      const result = await this.#runWithJobTimeout(() => worker(job, this.#prisma), controller, id);
       debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
 
       // Phase 3a: Update success
@@ -915,11 +1009,13 @@ export class PrismaQueue<
           notBefore: null,
         });
       }
-      // Only delete on terminal failure — otherwise the retry update is wasted.
-      if (isFinished && (deleteOn === "failure" || deleteOn === "always")) {
+      // Terminal failures become dead-letters: retained for inspection unless deleteOn:"always".
+      if (isFinished && deleteOn === "always") {
         await job.delete();
       }
       return { job, status: "error", error, deadLettered: isFinished };
+    } finally {
+      cleanup();
     }
   }
 
@@ -962,6 +1058,46 @@ export class PrismaQueue<
     }
     const { count } = await this.model.deleteMany({ where });
     return count;
+  }
+
+  /**
+   * Returns a breakdown of job counts by state for this queue, useful for monitoring/alerting (e.g.
+   * dead-letter depth or a growing backlog). The five states are mutually exclusive and cover every
+   * row: `pending` (ready to run now), `scheduled` (waiting on `runAt`/`notBefore`), `processing`
+   * (claimed but unfinished, includes stale claims), `completed` (succeeded), `dead` (dead-lettered).
+   */
+  public async stats(): Promise<{
+    pending: number;
+    scheduled: number;
+    processing: number;
+    completed: number;
+    dead: number;
+  }> {
+    const queue = this.name;
+    const now = new Date();
+    const [pending, scheduled, processing, completed, dead] = await Promise.all([
+      this.model.count({
+        where: {
+          queue,
+          finishedAt: null,
+          processedAt: null,
+          runAt: { lte: now },
+          OR: [{ notBefore: null }, { notBefore: { lte: now } }],
+        },
+      }),
+      this.model.count({
+        where: {
+          queue,
+          finishedAt: null,
+          processedAt: null,
+          OR: [{ runAt: { gt: now } }, { notBefore: { gt: now } }],
+        },
+      }),
+      this.model.count({ where: { queue, finishedAt: null, processedAt: { not: null } } }),
+      this.model.count({ where: { queue, finishedAt: { not: null }, deadLetteredAt: null } }),
+      this.model.count({ where: { queue, deadLetteredAt: { not: null } } }),
+    ]);
+    return { pending, scheduled, processing, completed, dead };
   }
 
   /**
