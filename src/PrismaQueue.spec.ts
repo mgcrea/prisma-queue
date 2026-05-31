@@ -416,63 +416,69 @@ describe("PrismaQueue", () => {
         void queue.stop();
       });
     });
-    describe("failure", () => {
-      beforeAll(() => {
-        // maxAttempts: 1 keeps the first failure terminal so deleteOn applies.
-        queue = createEmailQueue({ deleteOn: "failure", maxAttempts: 1 });
-      });
+    describe("dead-letter retention", () => {
       beforeEach(async () => {
         await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
-        void queue.start();
       });
-      afterEach(() => {
-        void queue.stop();
-      });
-      it("should properly dequeue a failed job", async () => {
-        let error: Error | null = null;
-        queue.worker = vi.fn(async (_job) => {
-          error = new Error("failed");
-          throw error;
+      it("should retain a dead-lettered job under deleteOn: success", async () => {
+        // deleteOn:"success" only removes successes — dead-letters are kept so the DLQ is inspectable.
+        const queue = createEmailQueue({
+          deleteOn: "success",
+          maxAttempts: 1,
+          pollInterval: 200,
+          name: "dlq-retain",
         });
-        const job = await queue.enqueue({ email: "foo@bar.com" });
-        await waitForNextJob(queue);
-        expect(queue.worker).toHaveBeenCalledTimes(1);
-        const record = await job.fetch();
-        expect(record).toBeNull();
+        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+          queue.worker = vi.fn(async () => {
+            throw new Error("failed");
+          });
+          const job = await queue.enqueue({ email: "foo@bar.com" });
+          void queue.start();
+          await waitForNextJob(queue);
+          await queue.stop();
+          const record = (await job.fetch())!;
+          expect(record).not.toBeNull();
+          expect(record.deadLetteredAt).toBeInstanceOf(Date);
+        } finally {
+          consoleSpy.mockRestore();
+        }
       });
-      it("should not delete a job that has retries remaining", async () => {
+      it("should not delete a job that has retries remaining (deleteOn: always)", async () => {
         const retryQueue = createEmailQueue({
-          deleteOn: "failure",
+          deleteOn: "always",
           maxAttempts: 3,
           pollInterval: 200,
+          name: "dlq-retry",
           retryStrategy: ({ attempts, maxAttempts }) => {
             if (maxAttempts !== null && attempts >= maxAttempts) return null;
             return 50;
           },
         });
-        await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
-        retryQueue.worker = vi.fn(async () => {
-          throw new Error("retry me");
-        });
-        // Attach listeners before starting so we don't miss the first dequeue.
-        const firstJob = waitForNextJob(retryQueue);
-        const allJobs = waitForNthJob(retryQueue, 3);
-        const job = await retryQueue.enqueue({ email: "retry-delete@test.com" });
-        void retryQueue.start();
-        // After the first failure the row must still exist so the retry can run.
-        await firstJob;
-        const afterFirst = await job.fetch();
-        expect(afterFirst).not.toBeNull();
-        expect(afterFirst!.attempts).toBe(1);
-        expect(afterFirst!.finishedAt).toBeNull();
-        // After exhausting retries the terminal failure should delete the row.
-        await allJobs;
-        await retryQueue.stop();
-        const afterFinal = await job.fetch();
-        expect(afterFinal).toBeNull();
-      });
-      afterAll(() => {
-        void queue.stop();
+        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+          retryQueue.worker = vi.fn(async () => {
+            throw new Error("retry me");
+          });
+          // Attach listeners before starting so we don't miss the first dequeue.
+          const firstJob = waitForNextJob(retryQueue);
+          const allJobs = waitForNthJob(retryQueue, 3);
+          const job = await retryQueue.enqueue({ email: "retry-delete@test.com" });
+          void retryQueue.start();
+          // After the first failure the row must still exist so the retry can run.
+          await firstJob;
+          const afterFirst = await job.fetch();
+          expect(afterFirst).not.toBeNull();
+          expect(afterFirst!.attempts).toBe(1);
+          expect(afterFirst!.finishedAt).toBeNull();
+          // After exhausting retries the terminal failure (dead-letter) is deleted under "always".
+          await allJobs;
+          await retryQueue.stop();
+          const afterFinal = await job.fetch();
+          expect(afterFinal).toBeNull();
+        } finally {
+          consoleSpy.mockRestore();
+        }
       });
     });
     describe("always", () => {
@@ -1384,6 +1390,155 @@ describe("PrismaQueue (robustness)", () => {
       } finally {
         consoleSpy.mockRestore();
       }
+    });
+  });
+
+  describe("dead-letter event", () => {
+    it("should dead-letter after the default maxAttempts and emit 'dead'", async () => {
+      const QUEUE_NAME = "deadletter-queue";
+      const queue = createEmailQueueNonTransactional({
+        pollInterval: 100,
+        name: QUEUE_NAME,
+        // No maxAttempts set → finite default (5). Tight delays so the run is fast.
+        retryStrategy: ({ attempts, maxAttempts }) => (attempts >= (maxAttempts ?? 0) ? null : 20),
+      });
+      const deadEvents: bigint[] = [];
+      queue.on("dead", (_error, job) => {
+        deadEvents.push(job.id);
+      });
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        queue.worker = vi.fn(async () => {
+          throw new Error("always fails");
+        });
+        const job = await queue.enqueue({ email: "dead@test.com" });
+        void queue.start();
+        await waitForNthJob(queue, 5); // default maxAttempts
+        await queue.stop();
+        expect(queue.worker).toHaveBeenCalledTimes(5);
+        expect(deadEvents).toEqual([job.id]);
+        const record = (await job.fetch())!;
+        expect(record.deadLetteredAt).toBeInstanceOf(Date);
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    }, 15000);
+  });
+
+  describe("jobTimeout", () => {
+    it("should abort the job signal and fail the attempt when a worker exceeds jobTimeout", async () => {
+      const QUEUE_NAME = "timeout-queue";
+      const queue = createEmailQueueNonTransactional({
+        pollInterval: 100,
+        name: QUEUE_NAME,
+        jobTimeout: 200,
+        maxAttempts: 1, // terminal on first timeout
+        retryStrategy: () => null,
+      });
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        queue.worker = vi.fn(async (job: EmailJob) => {
+          // Cooperative: waits, but resolves early once the timeout aborts the signal.
+          await waitFor(2000, job.signal).catch(() => {});
+          return { code: "200" };
+        });
+        const job = await queue.enqueue({ email: "slow@test.com" });
+        void queue.start();
+        await waitForNextJob(queue);
+        await queue.stop();
+        const record = (await job.fetch())!;
+        expect(record.failedAt).toBeInstanceOf(Date);
+        expect(record.deadLetteredAt).toBeInstanceOf(Date);
+        expect(JSON.stringify(record.error)).toContain("jobTimeout");
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    }, 10000);
+  });
+
+  describe("stats", () => {
+    it("should report mutually-exclusive counts by state", async () => {
+      const QUEUE_NAME = "stats-queue";
+      const queue = createEmailQueueNonTransactional({ name: QUEUE_NAME });
+      const now = Date.now();
+      const past = new Date(now - 1000);
+      const future = new Date(now + 60_000);
+      await prisma.queueJob.createMany({
+        data: [
+          { queue: QUEUE_NAME, payload: { email: "p@t.com" }, runAt: past },
+          { queue: QUEUE_NAME, payload: { email: "s@t.com" }, runAt: future },
+          { queue: QUEUE_NAME, payload: { email: "proc@t.com" }, runAt: past, processedAt: past },
+          { queue: QUEUE_NAME, payload: { email: "done@t.com" }, runAt: past, finishedAt: past },
+          {
+            queue: QUEUE_NAME,
+            payload: { email: "dead@t.com" },
+            runAt: past,
+            finishedAt: past,
+            failedAt: past,
+            deadLetteredAt: past,
+          },
+        ],
+      });
+      const stats = await queue.stats();
+      expect(stats).toEqual({ pending: 1, scheduled: 1, processing: 1, completed: 1, dead: 1 });
+    });
+  });
+
+  describe("enqueueMany", () => {
+    it("should bulk-insert with shared options and wake the loop to process them", async () => {
+      const QUEUE_NAME = "bulk-queue";
+      const queue = createEmailQueueNonTransactional({
+        pollInterval: 100,
+        name: QUEUE_NAME,
+        maxConcurrency: 3,
+      });
+      const processed: string[] = [];
+      queue.worker = vi.fn(async (job: EmailJob) => {
+        processed.push((job.payload as EmailJobPayload).email);
+        return { code: "200" };
+      });
+      const count = await queue.enqueueMany(
+        [{ email: "a@t.com" }, { email: "b@t.com" }, { email: "c@t.com" }],
+        { priority: 7 },
+      );
+      expect(count).toBe(3);
+      void queue.start();
+      await waitForNthJob(queue, 3);
+      await queue.stop();
+      expect(new Set(processed).size).toBe(3);
+    });
+    it("should return 0 for empty input", async () => {
+      const queue = createEmailQueueNonTransactional({ name: "bulk-empty-queue" });
+      expect(await queue.enqueueMany([])).toBe(0);
+    });
+  });
+
+  describe("purge", () => {
+    it("should delete finished jobs older than the cutoff, keeping pending ones", async () => {
+      const QUEUE_NAME = "purge-queue";
+      const queue = createEmailQueueNonTransactional({ name: QUEUE_NAME });
+      const old = new Date(Date.now() - 60_000);
+      await prisma.queueJob.createMany({
+        data: [
+          { queue: QUEUE_NAME, payload: { email: "done@t.com" }, finishedAt: old, runAt: old },
+          {
+            queue: QUEUE_NAME,
+            payload: { email: "dead@t.com" },
+            finishedAt: old,
+            failedAt: old,
+            deadLetteredAt: old,
+            runAt: old,
+          },
+          { queue: QUEUE_NAME, payload: { email: "pending@t.com" }, runAt: new Date() },
+        ],
+      });
+      const purgedDead = await queue.purge({ olderThanMs: 30_000, deadLetteredOnly: true });
+      expect(purgedDead).toBe(1);
+      const purgedRest = await queue.purge({ olderThanMs: 30_000 });
+      expect(purgedRest).toBe(1); // the remaining finished success
+      const remaining = await prisma.queueJob.findMany({ where: { queue: QUEUE_NAME } });
+      expect(remaining.length).toBe(1);
+      expect(remaining[0]?.finishedAt).toBeNull();
     });
   });
 });
