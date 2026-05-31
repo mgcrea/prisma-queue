@@ -30,9 +30,11 @@ Simple, reliable and efficient concurrent work queue for [Prisma](https://prisma
 
 - Leverages PostgreSQL [SKIP LOCKED](https://www.2ndquadrant.com/en/blog/what-is-select-skip-locked-for-in-postgresql-9-5/) feature to reliably dequeue jobs
 - Supports [crontab](https://crontab.guru) syntax for complex scheduled jobs, or a structured `interval` for fixed cadences (e.g. every 20 hours)
-- Pluggable retry strategies with exponential backoff by default
+- Pluggable retry strategies with exponential backoff by default; jobs that exhaust `maxAttempts` are **dead-lettered** (retained + `dead` event)
+- Automatic lease-based recovery of crashed/stuck jobs (no manual bookkeeping), plus optional per-job timeouts
 - Cooperative worker cancellation via `AbortSignal`
-- Separate `jobError` / `error` events for clean observability
+- Loud-by-default `jobError` / `dead` / `error` events for clean observability, plus a `stats()` breakdown for monitoring
+- Bulk `enqueueMany()` and a `purge()` retention helper
 - Compatible with **Prisma 7+** and any Prisma driver adapter (e.g. `@prisma/adapter-pg`)
 - Written in [TypeScript](https://www.typescriptlang.org/) for static type checking with exported types along the library.
 - Built by [tsdown](https://tsdown.dev) to provide both CommonJS and ESM packages.
@@ -139,16 +141,19 @@ main();
 |--------|------|---------|-------------|
 | `prisma` | `PrismaClient` | **(required)** | Your Prisma client instance |
 | `name` | `string` | `"default"` | Queue name for partitioning jobs |
-| `maxAttempts` | `number \| null` | `null` | Max retry attempts (`null` = unlimited) |
+| `maxAttempts` | `number \| null` | `5` | Max retry attempts before dead-lettering (`null` = unlimited) |
 | `maxConcurrency` | `number` | `1` | Max concurrent jobs |
 | `pollInterval` | `number` | `10000` | Polling interval in ms |
 | `jobInterval` | `number` | `50` | Delay between job dispatches in ms |
 | `tableName` | `string` | `"queue_jobs"` | Database table name (must match `@@map` in your schema) |
-| `deleteOn` | `"success" \| "failure" \| "always" \| "never"` | `"never"` | When to delete completed jobs |
+| `deleteOn` | `"success" \| "always" \| "never"` | `"never"` | When to delete completed jobs. `"success"` deletes successes (dead-letters retained); `"always"` also deletes dead-letters (opt out of DLQ); `"never"` keeps everything |
 | `transactionTimeout` | `number` | `1800000` | Transaction timeout in ms (30 min), transactional mode only |
 | `transactionWarningTimeout` | `number \| null` | `transactionTimeout / 2` | Warn if a transactional worker holds its transaction longer than this (ms); `0`/`null` disables |
 | `retryStrategy` | `RetryStrategy` | Exponential backoff | Custom retry logic |
+| `maxRetryDelay` | `number` | `2³¹-1` ms | Ceiling for the default retry backoff delay |
 | `transactional` | `boolean` | `false` | Run worker inside the dequeue transaction (exactly-once); default is at-least-once |
+| `staleTimeout` | `number \| null` | `21600000` | Lease (ms, 6h) after which a claimed-but-unfinished job is auto-reclaimed (non-transactional only); `0`/`null` disables |
+| `jobTimeout` | `number \| null` | `null` | Per-job wall-clock timeout (ms, non-transactional only); aborts the job's `signal` and fails the attempt |
 
 ### Events
 
@@ -167,9 +172,14 @@ queue.on("success", (result, job) => {
   console.log(`Job ${job.id} succeeded with`, result);
 });
 
-// Job execution failures (worker threw)
+// Job execution failures (worker threw) — fires on every failed attempt
 queue.on("jobError", (error, job) => {
   console.error(`Job ${job.id} failed:`, error);
+});
+
+// Permanent failure — fires once when a job is dead-lettered (attempts exhausted)
+queue.on("dead", (error, job) => {
+  console.error(`Job ${job.id} dead-lettered:`, error);
 });
 
 // System/infrastructure errors (poll failures, cron scheduling errors)
@@ -177,6 +187,8 @@ queue.on("error", (error) => {
   console.error("Queue system error:", error);
 });
 ```
+
+> By default, `jobError` and `error` log via `console.error` so failures are never silent. Attach your own listeners to route or quiet them.
 
 ### Custom Retry Strategy
 
@@ -199,6 +211,48 @@ const queue = createQueue<JobPayload, JobResult, typeof prisma>(
   },
   async (job, client) => {
     // ...
+  },
+);
+```
+
+### Dead-letter Queue & Monitoring
+
+A job that exhausts `maxAttempts` (default **5**) is permanently **dead-lettered**: its `deadLetteredAt` is set, it stays in the table for inspection, and a one-shot `dead` event fires. The attempt cap is also enforced at **claim time**, so a worker that hard-crashes the runtime (OOM, `process.exit`, segfault) can't loop forever — once reclaimed past its budget it is dead-lettered without running again.
+
+```ts
+queue.on("dead", (error, job) => {
+  alert(`Job ${job.id} dead-lettered after ${job.maxAttempts} attempts`, error);
+});
+
+// Monitor backlog and dead-letter depth (counts are mutually exclusive)
+const { pending, scheduled, processing, completed, dead } = await queue.stats();
+
+// Retention: prune old finished rows (dead-letters are retained unless you ask)
+await queue.purge({ olderThanMs: 7 * 24 * 60 * 60 * 1000 }); // finished jobs older than 7 days
+await queue.purge({ olderThanMs: 30 * 24 * 60 * 60 * 1000, deadLetteredOnly: true });
+```
+
+### Bulk Enqueue
+
+For high-throughput producers, `enqueueMany()` inserts many plain jobs in a single `createMany` (one round-trip) instead of one transaction per job. Keyed/cron/interval scheduling is not supported on this path — use `enqueue()`/`schedule()` for those.
+
+```ts
+const count = await queue.enqueueMany(
+  users.map((u) => ({ email: u.email })),
+  { priority: 1 }, // shared maxAttempts / priority / runAt
+);
+```
+
+### Per-job Timeout
+
+In the default (non-transactional) mode, set `jobTimeout` to bound a job's wall-clock time. On timeout the job's `signal` is aborted (so a cooperative worker can stop) and the attempt fails — then retried or dead-lettered as usual. (Transactional mode is bounded by `transactionTimeout` instead.)
+
+```ts
+const queue = createQueue(
+  { prisma, name: "imports", jobTimeout: 5 * 60 * 1000 }, // 5 min
+  async (job) => {
+    job.signal.addEventListener("abort", () => cleanup());
+    await doWork({ signal: job.signal });
   },
 );
 ```
@@ -406,6 +460,24 @@ process.exit(0);
 ```
 
 ## Migration Guide
+
+### Migrating from v2.x to v3.0
+
+v3.0 is a robustness-focused major. Breaking changes:
+
+1. **Default execution mode is now `transactional: false`** (at-least-once) instead of v2's `true` (exactly-once). The worker now receives the **full `PrismaClient`** (with `$transaction`) and runs outside the dequeue transaction. To keep v2 behavior, pass `transactional: true` explicitly — but prefer the default and write **idempotent workers**, since a crash-then-reclaim can run a job more than once. See [Execution Modes](#execution-modes).
+2. **`maxAttempts` now defaults to `5`** (was unlimited). A job that exhausts it is **dead-lettered** rather than retried forever. Pass `maxAttempts: null` to restore unlimited retries.
+3. **`deleteOn` enum changed**: `"failure"` was removed; the values are now `"success" | "always" | "never"`. Dead-letters are retained by default (and under `"success"`); only `"always"` deletes them. Use `purge()` for explicit dead-letter cleanup.
+4. **Schema: add the `deadLetteredAt` column** and (recommended) switch the dequeue index to the partial form. The shipped schema uses `@@index(..., where: raw("\"finishedAt\" IS NULL"))`, which needs the `partialIndexes` preview feature (Prisma 7.4+) in your `generator` block. Run `prisma db push` (or generate a migration) after updating.
+
+```prisma
+model QueueJob {
+  // ...existing fields...
+  deadLetteredAt DateTime?
+}
+```
+
+Non-breaking additions you may want to adopt: automatic stale-job recovery (`staleTimeout`, on by default in non-transactional mode), `jobTimeout`, `stats()`, `enqueueMany()`, `purge()`, and the `dead` event.
 
 ### Migrating from v1.x to v2.0
 
