@@ -35,7 +35,7 @@ Simple, reliable and efficient concurrent work queue for [Prisma](https://prisma
 - Cooperative worker cancellation via `AbortSignal`
 - Loud-by-default `jobError` / `dead` / `error` events for clean observability, plus a `stats()` breakdown for monitoring
 - Bulk `enqueueMany()` and a `purge()` retention helper
-- Compatible with **Prisma 7+** and any Prisma driver adapter (e.g. `@prisma/adapter-pg`)
+- Compatible with **Prisma 7.4+** and any Prisma driver adapter (e.g. `@prisma/adapter-pg`)
 - Written in [TypeScript](https://www.typescriptlang.org/) for static type checking with exported types along the library.
 - Built by [tsdown](https://tsdown.dev) to provide both CommonJS and ESM packages.
 
@@ -49,7 +49,7 @@ pnpm add @mgcrea/prisma-queue
 
 ### Peer dependencies
 
-This library requires **Prisma 7+** with a driver adapter:
+This library requires **Prisma 7.4+** (for the `partialIndexes` preview feature used by the dequeue index) with a driver adapter:
 
 ```bash
 pnpm add @prisma/client @prisma/adapter-pg
