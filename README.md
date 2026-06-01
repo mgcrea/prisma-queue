@@ -463,6 +463,8 @@ process.exit(0);
 
 ### Migrating from v2.x to v3.0
 
+> See **[MIGRATION.md](./MIGRATION.md)** for the full guide (schema SQL, semantics caveats, upgrade checklist, rollback).
+
 v3.0 is a robustness-focused major. Breaking changes:
 
 1. **Default execution mode is now `transactional: false`** (at-least-once) instead of v2's `true` (exactly-once). The worker now receives the **full `PrismaClient`** (with `$transaction`) and runs outside the dequeue transaction. To keep v2 behavior, pass `transactional: true` explicitly — but prefer the default and write **idempotent workers**, since a crash-then-reclaim can run a job more than once. See [Execution Modes](#execution-modes).
