@@ -182,6 +182,13 @@ queue.on("dead", (error, job) => {
   console.error(`Job ${job.id} dead-lettered:`, error);
 });
 
+// Stale-lease recovery — fires when claimed-but-unfinished jobs are reclaimed (non-transactional)
+queue.on("reclaim", (jobs) => {
+  for (const { id, stuckForMs } of jobs) {
+    console.warn(`Reclaimed job ${id} after ${stuckForMs}ms stuck`);
+  }
+});
+
 // System/infrastructure errors (poll failures, cron scheduling errors)
 queue.on("error", (error) => {
   console.error("Queue system error:", error);
@@ -189,6 +196,21 @@ queue.on("error", (error) => {
 ```
 
 > By default, `jobError` and `error` log via `console.error` so failures are never silent. Attach your own listeners to route or quiet them.
+
+#### Tracing orphaned jobs (`reclaim` → `JobExhaustedError`)
+
+When a worker is killed mid-job (deploy / OOM / eviction) in the default non-transactional mode, the claim is recovered by the stale lease — emitting `reclaim` with each job's `id` and how long it was `stuckForMs`. If such a job is reclaimed past its `maxAttempts`, it is dead-lettered with a typed **`JobExhaustedError`** (carrying `queue`, `jobId`, `attempts`, `maxAttempts`, and the prior attempt's `lastError`) on the `dead`/`jobError` events. Correlate the two by job `id` to trace an orphaned-then-retired job end to end:
+
+```ts
+import { JobExhaustedError } from "@mgcrea/prisma-queue";
+
+queue.on("dead", (error, job) => {
+  if (error instanceof JobExhaustedError) {
+    metrics.increment("queue.exhausted", { queue: error.queue });
+    // error.lastError holds the prior attempt's recorded failure (or null if orphaned before any)
+  }
+});
+```
 
 ### Custom Retry Strategy
 
