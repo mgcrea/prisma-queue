@@ -1,4 +1,4 @@
-import { createQueue, type PrismaQueue } from "src/index";
+import { createQueue, JobExhaustedError, type PrismaQueue } from "src/index";
 import { PrismaJob } from "src/PrismaJob";
 import { debug, serializeError, waitFor } from "src/utils";
 import {
@@ -1143,6 +1143,42 @@ describe("PrismaQueue (transactional: false)", () => {
       const count = await queue.requeueStale({ olderThanMs: 30_000 });
       expect(count).toBe(0);
     });
+    it("should emit a 'reclaim' event reporting reclaimed ids and stuck duration", async () => {
+      const queue = createEmailQueueNonTransactional({ pollInterval: 200, name: STALE_QUEUE_NAME });
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
+      const staleDate = new Date(Date.now() - 60_000);
+      const stuck = await prisma.queueJob.create({
+        data: {
+          queue: STALE_QUEUE_NAME,
+          payload: { email: "stuck@test.com" },
+          processedAt: staleDate,
+          attempts: 1,
+          runAt: staleDate,
+        },
+      });
+      const reclaims: { id: bigint; stuckForMs: number }[][] = [];
+      queue.on("reclaim", (jobs) => {
+        reclaims.push(jobs);
+      });
+      const count = await queue.requeueStale({ olderThanMs: 30_000 });
+      expect(count).toBe(1);
+      expect(reclaims).toHaveLength(1);
+      expect(reclaims[0]).toHaveLength(1);
+      expect(reclaims[0]?.[0]?.id).toBe(stuck.id);
+      // Was stuck ~60s; allow generous slack for clock/runtime.
+      expect(reclaims[0]?.[0]?.stuckForMs).toBeGreaterThanOrEqual(55_000);
+    });
+    it("should not emit 'reclaim' when nothing is stale", async () => {
+      const queue = createEmailQueueNonTransactional({ pollInterval: 200, name: STALE_QUEUE_NAME });
+      await prisma.$executeRawUnsafe('DELETE FROM "queue_jobs"');
+      const reclaims: unknown[] = [];
+      queue.on("reclaim", (jobs) => {
+        reclaims.push(jobs);
+      });
+      const count = await queue.requeueStale({ olderThanMs: 30_000 });
+      expect(count).toBe(0);
+      expect(reclaims).toHaveLength(0);
+    });
   });
 
   describe("rolling upgrade safety", () => {
@@ -1218,6 +1254,46 @@ describe("PrismaQueue (robustness)", () => {
       expect(record?.finishedAt).toBeInstanceOf(Date);
       expect(record?.failedAt).toBeInstanceOf(Date);
       expect(record?.error).toBeTruthy();
+    });
+    it("should surface a JobExhaustedError on the 'dead' event with queue/attempts context", async () => {
+      const queue = createEmailQueueNonTransactional({
+        pollInterval: 100,
+        name: QUEUE_NAME,
+        maxAttempts: 2,
+      });
+      queue.worker = vi.fn(async () => ({ code: "200" }));
+      const deadErrors: unknown[] = [];
+      queue.on("dead", (error) => {
+        deadErrors.push(error);
+      });
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        // Orphaned job with a recorded prior error: attempts already at the cap → claim pushes it over.
+        const created = await prisma.queueJob.create({
+          data: {
+            queue: QUEUE_NAME,
+            payload: { email: "exhausted@test.com" },
+            attempts: 2,
+            maxAttempts: 2,
+            error: serializeError(new Error("prior worker boom")),
+            runAt: new Date(),
+          },
+        });
+        void queue.start();
+        await waitForNextEvent(queue, "dead");
+        await queue.stop();
+        expect(deadErrors).toHaveLength(1);
+        const error = deadErrors[0];
+        expect(error).toBeInstanceOf(JobExhaustedError);
+        const exhausted = error as JobExhaustedError;
+        expect(exhausted.jobId).toBe(created.id);
+        expect(exhausted.queue).toBe(QUEUE_NAME);
+        expect(exhausted.maxAttempts).toBe(2);
+        expect(exhausted.attempts).toBeGreaterThan(2); // incremented past the cap at claim
+        expect((exhausted.lastError as { message?: string })?.message).toBe("prior worker boom");
+      } finally {
+        consoleSpy.mockRestore();
+      }
     });
   });
 
