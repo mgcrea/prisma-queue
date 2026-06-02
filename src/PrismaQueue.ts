@@ -4,6 +4,7 @@ import assert from "node:assert";
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Cron } from "croner";
 
+import { JobExhaustedError } from "./errors";
 import { PrismaJob } from "./PrismaJob";
 import type {
   DatabaseJob,
@@ -123,6 +124,12 @@ export type PrismaQueueEvents<T extends JobPayload = JobPayload, U extends JobRe
   jobError: (error: unknown, job: PrismaJob<T, U>) => void;
   /** Emitted once when a job is permanently dead-lettered after exhausting its attempts. */
   dead: (error: unknown, job: PrismaJob<T, U>) => void;
+  /**
+   * Emitted when the stale lease (or a manual `requeueStale`) reclaims jobs that were claimed but never
+   * finished — the root-cause event behind a later `JobExhaustedError`. Reports each reclaimed job id and
+   * how long it had been stuck, so an orphaned-then-retired job is traceable end to end.
+   */
+  reclaim: (jobs: { id: bigint; stuckForMs: number }[]) => void;
   error: (error: unknown) => void;
 };
 
@@ -624,10 +631,8 @@ export class PrismaQueue<
       return;
     }
     this.#lastReclaimAt = now;
-    const count = await this.requeueStale({ olderThanMs: staleTimeout });
-    if (count > 0) {
-      debug(`reclaimed ${count} stale job(s) for queue named="${this.name}"`);
-    }
+    // requeueStale logs and emits the `reclaim` event for any jobs it reclaims.
+    await this.requeueStale({ olderThanMs: staleTimeout });
   }
 
   /**
@@ -791,7 +796,9 @@ export class PrismaQueue<
    * exhausted its budget). Returns the error recorded against the job.
    */
   async #finalizeExhausted(job: PrismaJob<T, U>, maxAttempts: number): Promise<Error> {
-    const error = new Error(`Job exceeded maxAttempts (${maxAttempts}) without completing`);
+    // A dedicated error type carrying queue/job/attempts and the prior attempt's recorded error, so the
+    // failure is self-explanatory (the generic message alone hides which queue and why it never completed).
+    const error = new JobExhaustedError(job, maxAttempts);
     const date = new Date();
     await job.update({
       finishedAt: date,
@@ -1021,21 +1028,46 @@ export class PrismaQueue<
 
   /**
    * Requeues stale jobs that were claimed but never completed (e.g., due to a process crash
-   * in non-transactional mode). Resets `processedAt` to null for jobs older than the cutoff.
+   * in non-transactional mode). Resets `processedAt` to null for jobs older than the cutoff, and
+   * emits a `reclaim` event reporting each reclaimed job's id and how long it had been stuck.
    * @param options.olderThanMs - Only requeue jobs claimed more than this many milliseconds ago.
    * @returns The number of jobs requeued.
    */
   public async requeueStale(options: { olderThanMs: number }): Promise<number> {
     const cutoff = new Date(Date.now() - options.olderThanMs);
-    const { count } = await this.model.updateMany({
-      where: {
-        queue: this.name,
-        processedAt: { lte: cutoff },
-        finishedAt: null,
-      },
-      data: { processedAt: null },
-    });
-    return count;
+    const tableName = this.#escapedTableName;
+    // Single atomic statement: lock the stale rows, reset their claim, and RETURN exactly the rows
+    // reset together with their pre-reset claim time. This keeps the `reclaim` event accurate (no
+    // snapshot/update race), avoids round-tripping a potentially huge id list after a mass crash, and
+    // `SKIP LOCKED` steps around any concurrent dequeue rather than blocking on it.
+    const rows: { id: bigint; prevProcessedAt: Date }[] = await (this.#prisma as any).$queryRawUnsafe(
+      `WITH stale AS (
+         SELECT id, "processedAt"
+         FROM ${tableName}
+         WHERE ("queue" = $1)
+           AND ("processedAt" <= $2)
+           AND ("finishedAt" IS NULL)
+         FOR UPDATE SKIP LOCKED
+       )
+       UPDATE ${tableName} AS q
+       SET "processedAt" = NULL
+       FROM stale
+       WHERE q.id = stale.id
+       RETURNING q.id AS "id", stale."processedAt" AS "prevProcessedAt";`,
+      this.name,
+      cutoff,
+    );
+    if (rows.length === 0) {
+      return 0;
+    }
+    const now = Date.now();
+    const reclaimed = rows.map((row) => ({
+      id: row.id,
+      stuckForMs: Math.max(0, now - new Date(row.prevProcessedAt).getTime()),
+    }));
+    this.emit("reclaim", reclaimed);
+    debug(`reclaimed ${rows.length} stale job(s) for queue named="${this.name}"`);
+    return rows.length;
   }
 
   /**

@@ -2,6 +2,7 @@
 
 exports[`module > should export a stable API 1`] = `
 {
+  "JobExhaustedError": [Function],
   "PrismaJob": [Function],
   "PrismaQueue": [Function],
   "createQueue": [Function],
