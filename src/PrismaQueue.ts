@@ -90,7 +90,8 @@ export type EnqueueOptions = {
   repeatFrom?: RepeatFrom;
   runAt?: Date;
   key?: string;
-  maxAttempts?: number;
+  /** Overrides the queue's `maxAttempts` for this job; `null` means unlimited. */
+  maxAttempts?: number | null;
   priority?: number;
 };
 
@@ -769,10 +770,10 @@ export class PrismaQueue<
       return null;
     }
     // The next occurrence keeps the settings `schedule()` gave this one, not the queue defaults.
-    const carried: Pick<EnqueueOptions, "priority" | "maxAttempts"> = { priority };
-    if (job.record.maxAttempts !== null) {
-      carried.maxAttempts = job.record.maxAttempts;
-    }
+    const carried: Pick<EnqueueOptions, "priority" | "maxAttempts"> = {
+      priority,
+      maxAttempts: job.record.maxAttempts,
+    };
     if (cron) {
       const runAt = new Cron(cron).nextRun();
       if (!runAt) {

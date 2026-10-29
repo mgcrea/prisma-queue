@@ -1398,6 +1398,24 @@ describe("PrismaQueue (robustness)", () => {
         expect(next.maxAttempts).toBe(9);
       },
     );
+
+    it("should keep a per-job unlimited maxAttempts on the next occurrence", async () => {
+      const QUEUE_NAME = "reschedule-unlimited";
+      const queue = createEmailQueue({ pollInterval: 100, name: QUEUE_NAME });
+      await queue.schedule(
+        { key: "tick", interval: { seconds: 60 }, maxAttempts: null },
+        { email: "tick@test.com" },
+      );
+      const rescheduled = waitForNextEvent(queue, "enqueue");
+      void queue.start();
+      await waitForNextJob(queue);
+      await rescheduled;
+      await queue.stop();
+      const next = await prisma.queueJob.findFirstOrThrow({
+        where: { queue: QUEUE_NAME, key: "tick", finishedAt: null },
+      });
+      expect(next.maxAttempts).toBeNull();
+    });
   });
 
   describe("loud failures", () => {
