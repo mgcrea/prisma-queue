@@ -1367,6 +1367,31 @@ describe("PrismaQueue (robustness)", () => {
       });
       expect(pending.length).toBe(1);
     });
+
+    it.each([
+      ["transactional", createEmailQueue],
+      ["non-transactional", createEmailQueueNonTransactional],
+    ] as const)(
+      "should carry priority and maxAttempts over to the next occurrence (%s)",
+      async (mode, create) => {
+        const QUEUE_NAME = `reschedule-options-${mode}`;
+        const queue = create({ pollInterval: 100, name: QUEUE_NAME });
+        await queue.schedule(
+          { key: "tick", interval: { seconds: 60 }, priority: 3, maxAttempts: 9 },
+          { email: "tick@test.com" },
+        );
+        const rescheduled = waitForNextEvent(queue, "enqueue");
+        void queue.start();
+        await waitForNextJob(queue);
+        await rescheduled;
+        await queue.stop();
+        const next = await prisma.queueJob.findFirstOrThrow({
+          where: { queue: QUEUE_NAME, key: "tick", finishedAt: null },
+        });
+        expect(next.priority).toBe(3);
+        expect(next.maxAttempts).toBe(9);
+      },
+    );
   });
 
   describe("loud failures", () => {

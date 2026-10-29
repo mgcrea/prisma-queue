@@ -764,16 +764,21 @@ export class PrismaQueue<
    * transactional (in-transaction) and non-transactional (post-commit) reschedule paths.
    */
   #nextOccurrenceOptions(job: PrismaJob<T, U>): { payload: T; options: EnqueueOptions } | null {
-    const { key, cron, intervalMs, repeatFrom, payload, finishedAt } = job;
+    const { key, cron, intervalMs, repeatFrom, payload, finishedAt, priority } = job;
     if (!finishedAt || !key) {
       return null;
+    }
+    // The next occurrence keeps the settings `schedule()` gave this one, not the queue defaults.
+    const carried: Pick<EnqueueOptions, "priority" | "maxAttempts"> = { priority };
+    if (job.record.maxAttempts !== null) {
+      carried.maxAttempts = job.record.maxAttempts;
     }
     if (cron) {
       const runAt = new Cron(cron).nextRun();
       if (!runAt) {
         return null;
       }
-      return { payload: payload as T, options: { key, cron, runAt } };
+      return { payload: payload as T, options: { ...carried, key, cron, runAt } };
     }
     if (intervalMs !== null) {
       const intervalMsNumber = Number(intervalMs);
@@ -782,6 +787,7 @@ export class PrismaQueue<
       return {
         payload: payload as T,
         options: {
+          ...carried,
           key,
           intervalMs: intervalMsNumber,
           repeatFrom: (repeatFrom ?? "finishedAt") as RepeatFrom,
