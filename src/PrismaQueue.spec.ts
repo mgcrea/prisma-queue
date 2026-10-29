@@ -115,7 +115,10 @@ describe("PrismaQueue", () => {
       );
       void queue.start();
       await waitForNextEvent(queue, "enqueue");
-      const jobs = await prisma.queueJob.findMany({ where: { key: "email-schedule" } });
+      const jobs = await prisma.queueJob.findMany({
+        where: { key: "email-schedule" },
+        orderBy: { id: "asc" },
+      });
       expect(jobs.length).toBe(2);
       const record = jobs[1];
       expect(record).toBeDefined();
@@ -1090,7 +1093,10 @@ describe("PrismaQueue (transactional: false)", () => {
       );
       void queue.start();
       await waitForNextEvent(queue, "enqueue");
-      const jobs = await prisma.queueJob.findMany({ where: { key: "nt-email-schedule" } });
+      const jobs = await prisma.queueJob.findMany({
+        where: { key: "nt-email-schedule" },
+        orderBy: { id: "asc" },
+      });
       expect(jobs.length).toBe(2);
       const nextJob = jobs[1];
       expect(nextJob?.runAt.getHours()).toBe(5);
