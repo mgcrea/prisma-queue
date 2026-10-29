@@ -1418,6 +1418,38 @@ describe("PrismaQueue (robustness)", () => {
     });
   });
 
+  describe("transactional worker query failure", () => {
+    it("should count attempts and dead-letter when the worker's own query fails", async () => {
+      const QUEUE_NAME = "tx-query-failure";
+      const queue = createEmailQueue({
+        pollInterval: 100,
+        jobInterval: 10,
+        name: QUEUE_NAME,
+        maxAttempts: 2,
+        retryStrategy: ({ attempts, maxAttempts }) =>
+          maxAttempts !== null && attempts >= maxAttempts ? null : 20,
+      });
+      queue.removeAllListeners("jobError"); // silence the default console.error
+      queue.worker = vi.fn(async (_job, client) => {
+        // A partial write that must not survive the failed attempt.
+        await client.queueJob.create({ data: { queue: `${QUEUE_NAME}-marker` } });
+        // Any failing statement puts the whole Postgres transaction in the aborted state.
+        await client.$executeRawUnsafe("SELECT 1/0");
+        return { code: "200" };
+      });
+      const job = await queue.enqueue({ email: "fail@test.com" });
+      const dead = waitForNextEvent(queue, "dead");
+      void queue.start();
+      await dead;
+      await queue.stop();
+      expect(queue.worker).toHaveBeenCalledTimes(2);
+      const record = await prisma.queueJob.findUniqueOrThrow({ where: { id: job.id } });
+      expect(record.attempts).toBe(2);
+      expect(record.deadLetteredAt).not.toBeNull();
+      expect(await prisma.queueJob.count({ where: { queue: `${QUEUE_NAME}-marker` } })).toBe(0);
+    }, 10000);
+  });
+
   describe("loud failures", () => {
     it("should log to console.error by default on worker failure", async () => {
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});

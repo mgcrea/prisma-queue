@@ -153,6 +153,7 @@ const DEFAULT_POLL_INTERVAL = 10 * 1000;
 const DEFAULT_JOB_INTERVAL = 50;
 const DEFAULT_DELETE_ON = "never";
 const DEFAULT_MAX_ATTEMPTS = 5; // finite by default so a poison job dead-letters instead of retrying forever
+const WORKER_SAVEPOINT = "prisma_queue_worker";
 const DEFAULT_STALE_TIMEOUT = 6 * 60 * 60 * 1000; // 6 hours — generous so long-running jobs aren't reclaimed mid-flight
 const makeDefaultRetryStrategy =
   (maxDelay: number): RetryStrategy =>
@@ -930,6 +931,9 @@ export class PrismaQueue<
           const error = await this.#finalizeExhausted(job, maxAttempts);
           outcome = { job, status: "error", error, deadLettered: true };
         } else {
+          // Lets a failure be recorded even when a failed statement in the worker aborted the
+          // Postgres transaction (see the catch below).
+          await (client as any).$executeRawUnsafe(`SAVEPOINT ${WORKER_SAVEPOINT}`);
           const warnTimer = this.#startSlowTransactionWarning(id);
           try {
             debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
@@ -940,7 +944,17 @@ export class PrismaQueue<
             outcome = { job, status: "success", result };
           } catch (error) {
             clearTimeout(warnTimer);
-            const deadLettered = await this.#recordFailure(job, claimed, error);
+            let deadLettered: boolean;
+            try {
+              // The worker's writes (progress included) commit along with the failure record.
+              deadLettered = await this.#recordFailure(job, claimed, error);
+            } catch {
+              // A failed statement in the worker aborted the transaction, so recording the failure
+              // failed too; left alone, the rollback would undo the attempts++ and the job would be
+              // re-run at once, forever. Discard the worker's writes and record it again.
+              await (client as any).$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${WORKER_SAVEPOINT}`);
+              deadLettered = await this.#recordFailure(job, claimed, error);
+            }
             outcome = { job, status: "error", error, deadLettered };
           }
         }
