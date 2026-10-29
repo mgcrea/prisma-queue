@@ -480,6 +480,9 @@ export class PrismaQueue<
    */
   private async poll(): Promise<void> {
     const { maxConcurrency, pollInterval, jobInterval } = this.config;
+    // Bound to this loop's own start(): a stop() followed by a new start() swaps the controller and
+    // resets `stopped`, so a loop still awaiting a query must not pick those up and keep running.
+    const { signal } = this.abortController;
     debug(
       `polling queue named="${this.name}" with pollInterval=${pollInterval} maxConcurrency=${maxConcurrency}...`,
     );
@@ -487,7 +490,7 @@ export class PrismaQueue<
     // Tracks whether the previous batch of probes produced a job, to pick the backoff below.
     let recentlyActive = false;
 
-    while (!this.stopped) {
+    while (!signal.aborted) {
       try {
         // #2 Reclaim stale claimed-but-unfinished jobs on a lease (non-transactional mode only).
         await this.#maybeReclaimStale();
@@ -495,7 +498,7 @@ export class PrismaQueue<
         // Saturated: re-check soon (no DB query here) so the next slot is picked up promptly rather
         // than after a full pollInterval.
         if (this.concurrency >= maxConcurrency) {
-          await waitFor(jobInterval, this.abortController.signal);
+          await waitFor(jobInterval, signal);
           continue;
         }
 
@@ -503,7 +506,7 @@ export class PrismaQueue<
         // an empty queue, so we just spawn up to the available slots and let each no-op when empty.
         const slotsAvailable = maxConcurrency - this.concurrency;
         recentlyActive = false;
-        for (let i = 0; i < slotsAvailable && !this.stopped; i++) {
+        for (let i = 0; i < slotsAvailable && !signal.aborted; i++) {
           debug(`processing job from queue named="${this.name}"...`);
           this.concurrency++;
           setImmediate(() => {
@@ -524,15 +527,15 @@ export class PrismaQueue<
                 }
               });
           });
-          await waitFor(jobInterval, this.abortController.signal);
+          await waitFor(jobInterval, signal);
         }
 
         // Let the just-spawned probes settle, then back off: short while actively draining the
         // queue, long (pollInterval) when it looks idle (no job found and nothing in flight). The
         // idle wait is interrupted by `#wake()` so a job enqueued mid-sleep is picked up promptly.
-        await waitFor(jobInterval * 2, this.abortController.signal);
+        await waitFor(jobInterval * 2, signal);
         if (!recentlyActive && this.concurrency === 0) {
-          await this.#waitForPoll(pollInterval);
+          await this.#waitForPoll(pollInterval, signal);
         }
       } catch (error) {
         if (error instanceof AbortError) {
@@ -542,7 +545,7 @@ export class PrismaQueue<
         // Emit error and continue polling after a delay
         this.emit("error", error);
         // eslint-disable-next-line @typescript-eslint/no-empty-function
-        await waitFor(pollInterval, this.abortController.signal).catch(() => {});
+        await waitFor(pollInterval, signal).catch(() => {});
       }
     }
   }
@@ -580,8 +583,7 @@ export class PrismaQueue<
    * Idle wait used by `poll()`: resolves after `ms`, early on `#wake()`, or rejects with `AbortError`
    * when the queue is stopped. Consumes a latched wake immediately.
    */
-  async #waitForPoll(ms: number): Promise<void> {
-    const signal = this.abortController.signal;
+  async #waitForPoll(ms: number, signal: AbortSignal): Promise<void> {
     if (signal.aborted) {
       throw new AbortError("Aborted");
     }

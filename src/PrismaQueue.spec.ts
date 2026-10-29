@@ -1409,6 +1409,22 @@ describe("PrismaQueue (robustness)", () => {
     }, 10000);
   });
 
+  describe("restart", () => {
+    it("should end the previous poll loop when restarted while it awaits the database", async () => {
+      const queue = createEmailQueueNonTransactional({ pollInterval: 100, name: "restart-queue" });
+      // The first poll iteration awaits the stale-lease sweep, a query stop() cannot abort.
+      const firstLoop = queue.start();
+      await queue.stop();
+      void queue.start();
+      const firstLoopEnded = await Promise.race([
+        firstLoop.then(() => true),
+        waitFor(1000).then(() => false),
+      ]);
+      await queue.stop();
+      expect(firstLoopEnded).toBe(true);
+    });
+  });
+
   describe("default mode", () => {
     it("should default to non-transactional, passing the full PrismaClient to the worker", async () => {
       // No `transactional` option → at-least-once default; the worker receives the full client.
