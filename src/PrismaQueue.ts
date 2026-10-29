@@ -641,9 +641,11 @@ export class PrismaQueue<
     if (now - this.#lastReclaimAt < staleTimeout) {
       return;
     }
-    this.#lastReclaimAt = now;
     // requeueStale logs and emits the `reclaim` event for any jobs it reclaims.
     await this.requeueStale({ olderThanMs: staleTimeout });
+    // Only after success: a sweep that failed (e.g. a DB blip) is retried on the next poll rather
+    // than a whole lease window later.
+    this.#lastReclaimAt = now;
   }
 
   /**

@@ -1344,6 +1344,23 @@ describe("PrismaQueue (robustness)", () => {
       const record = await prisma.queueJob.findUnique({ where: { id: created.id } });
       expect(record?.finishedAt).toBeInstanceOf(Date);
     });
+    it("should retry a failed reclaim sweep on the next poll instead of after staleTimeout", async () => {
+      const queue = createEmailQueueNonTransactional({
+        pollInterval: 100,
+        staleTimeout: 60_000,
+        name: "lease-retry-queue",
+      });
+      queue.removeAllListeners("error"); // silence the default console.error
+      const errors: unknown[] = [];
+      queue.on("error", (error) => errors.push(error));
+      const sweep = vi.spyOn(queue, "requeueStale").mockRejectedValueOnce(new Error("db blip"));
+      void queue.start();
+      await waitFor(500);
+      await queue.stop();
+      expect(errors).toHaveLength(1);
+      expect(sweep.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
     it("should ignore staleTimeout in transactional mode", async () => {
       const QUEUE_NAME = "lease-txn-queue";
       const queue = createEmailQueue({ pollInterval: 100, name: QUEUE_NAME, staleTimeout: 1000 });
