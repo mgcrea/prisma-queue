@@ -306,6 +306,8 @@ await queue.schedule(
 );
 ```
 
+The first `schedule()` for a key runs the job right away (or at `runAt`, if given). Calling it again for the same key, typically at every app start, keeps the pending occurrence's `runAt` and only updates its payload and settings, so a deploy doesn't trigger an extra run or reset the cadence.
+
 By default, the next run for an interval job is scheduled as `finishedAt + interval` — drift-tolerant, so a slow run doesn't cause a backlog. Pass `repeatFrom: "runAt"` for a fixed wall-clock cadence (`previousRunAt + interval`) — the same drift-free behavior as cron:
 
 ```ts

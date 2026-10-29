@@ -473,7 +473,14 @@ export class PrismaQueue<
     assert("interval" in options && options.interval, "Provide either cron or interval");
     const intervalMs = intervalToMs(options.interval);
     const repeatFrom: RepeatFrom = options.repeatFrom ?? "finishedAt";
-    const runAt = firstRunAt ?? new Date();
+    // Scheduling a key again (typically at every app start) keeps its unfinished occurrence's runAt,
+    // so it updates the job instead of running it early and resetting its cadence.
+    const pending: { runAt: Date } | null = await this.model.findFirst({
+      where: { queue: this.name, key, finishedAt: null },
+      orderBy: { runAt: "asc" },
+      select: { runAt: true },
+    });
+    const runAt = firstRunAt ?? pending?.runAt ?? new Date();
     return this.enqueue(payloadOrFunction, { ...base, intervalMs, repeatFrom, runAt });
   }
 

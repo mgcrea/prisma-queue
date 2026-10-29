@@ -153,6 +153,19 @@ describe("PrismaQueue", () => {
       expect(record.runAt.getTime()).toBeGreaterThanOrEqual(before);
       expect(record.runAt.getTime()).toBeLessThanOrEqual(Date.now() + 100);
     });
+    it("should keep the pending occurrence when an interval job is scheduled again", async () => {
+      const options = { key: "email-interval-again", interval: { hours: 20 } };
+      const first = await queue.schedule(options, { email: "foo@bar.com" });
+      // As if it had already run once: the chain's next occurrence is 20h away.
+      const nextRunAt = new Date(Date.now() + 20 * 60 * 60 * 1000);
+      await prisma.queueJob.update({ where: { id: first.id }, data: { runAt: nextRunAt } });
+      // An app restart calls schedule() again, with an updated payload.
+      await queue.schedule(options, { email: "baz@bar.com" });
+      const jobs = await prisma.queueJob.findMany({ where: { key: "email-interval-again" } });
+      expect(jobs.length).toBe(1);
+      expect(jobs[0]?.runAt.getTime()).toBe(nextRunAt.getTime());
+      expect(jobs[0]?.payload).toEqual({ email: "baz@bar.com" });
+    });
     it("should re-enqueue an interval job from finishedAt by default", async () => {
       await queue.schedule({ key: "email-interval", interval: { seconds: 30 } }, { email: "foo@bar.com" });
       await waitForNextEvent(queue, "enqueue");
