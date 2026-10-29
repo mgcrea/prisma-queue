@@ -823,39 +823,97 @@ export class PrismaQueue<
     return error;
   }
 
+  /**
+   * Atomically claims the next runnable job of this queue through `client` (setting `processedAt`
+   * and incrementing `attempts`), or returns `undefined` when none is available. `SKIP LOCKED` lets
+   * concurrent workers claim different rows without blocking each other.
+   */
+  async #claimNext(client: unknown, now: Date): Promise<DatabaseJob<T, U> | undefined> {
+    const tableName = this.#escapedTableName;
+    const rows: DatabaseJob<T, U>[] = await (client as any).$queryRawUnsafe(
+      `UPDATE ${tableName} SET "processedAt" = $2, "attempts" = "attempts" + 1
+       WHERE id = (
+         SELECT id
+         FROM ${tableName}
+         WHERE (${tableName}."queue" = $1)
+           AND (${tableName}."finishedAt" IS NULL)
+           AND (${tableName}."processedAt" IS NULL)
+           AND (${tableName}."runAt" <= $2)
+           AND (${tableName}."notBefore" IS NULL OR ${tableName}."notBefore" <= $2)
+         ORDER BY ${tableName}."priority" ASC, ${tableName}."runAt" ASC
+         FOR UPDATE SKIP LOCKED
+         LIMIT 1
+       )
+       RETURNING *;`,
+      this.name,
+      now,
+    );
+    return rows[0];
+  }
+
+  /** Records a successful attempt, deleting the row when `deleteOn` asks for it. */
+  async #recordSuccess(job: PrismaJob<T, U>, result: U): Promise<void> {
+    const { deleteOn } = this.config;
+    const date = new Date();
+    await job.update({ finishedAt: date, progress: 100, result, error: null });
+    if (deleteOn === "success" || deleteOn === "always") {
+      await job.delete();
+    }
+  }
+
+  /**
+   * Records a failed attempt of the `claimed` job: schedules a retry when the `retryStrategy` returns a
+   * delay, otherwise dead-letters it. Returns whether the failure was terminal.
+   */
+  async #recordFailure(job: PrismaJob<T, U>, claimed: DatabaseJob<T, U>, error: unknown): Promise<boolean> {
+    const { id, payload, attempts, maxAttempts } = claimed;
+    const date = new Date();
+    debug(
+      `failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${String(error)}"`,
+    );
+    const delay = this.config.retryStrategy({ attempts, maxAttempts, error });
+    const isFinished = delay === null;
+    if (!isFinished) {
+      const notBefore = new Date(date.getTime() + delay);
+      debug(`will retry at notBefore=${notBefore.toISOString()} (attempts=${attempts})`);
+      await job.update({
+        processedAt: null,
+        finishedAt: null,
+        failedAt: date,
+        error: serializeError(error),
+        notBefore,
+      });
+    } else {
+      await job.update({
+        finishedAt: date,
+        failedAt: date,
+        deadLetteredAt: date,
+        error: serializeError(error),
+        notBefore: null,
+      });
+    }
+    // Terminal failures become dead-letters: retained for inspection unless deleteOn:"always".
+    if (isFinished && this.config.deleteOn === "always") {
+      await job.delete();
+    }
+    return isFinished;
+  }
+
   private async dequeueTransactional(): Promise<DequeueOutcome<T, U>> {
-    const { name: queueName } = this;
-    const { deleteOn, transactionTimeout } = this.config;
+    const { transactionTimeout } = this.config;
     const tableName = this.#escapedTableName;
     const now = new Date();
     const worker = this.worker as JobWorker<T, U, C>;
 
     return (await (this.#prisma as any).$transaction(
       async (client: TransactionClient<C>): Promise<DequeueOutcome<T, U>> => {
-        const rows: DatabaseJob<T, U>[] = await (client as any).$queryRawUnsafe(
-          `UPDATE ${tableName} SET "processedAt" = $2, "attempts" = "attempts" + 1
-           WHERE id = (
-             SELECT id
-             FROM ${tableName}
-             WHERE (${tableName}."queue" = $1)
-               AND (${tableName}."finishedAt" IS NULL)
-               AND (${tableName}."processedAt" IS NULL)
-               AND (${tableName}."runAt" <= $2)
-               AND (${tableName}."notBefore" IS NULL OR ${tableName}."notBefore" <= $2)
-             ORDER BY ${tableName}."priority" ASC, ${tableName}."runAt" ASC
-             FOR UPDATE SKIP LOCKED
-             LIMIT 1
-           )
-           RETURNING *;`,
-          queueName,
-          now,
-        );
-        if (!rows.length || !rows[0]) {
+        const claimed = await this.#claimNext(client, now);
+        if (!claimed) {
           debug(`no jobs found in queue named="${this.name}"`);
           return { job: null, status: "none" };
         }
-        const { id, payload, attempts, maxAttempts } = rows[0];
-        const job = new PrismaJob<T, U>(rows[0], {
+        const { id, payload, attempts, maxAttempts } = claimed;
+        const job = new PrismaJob<T, U>(claimed, {
           model: this.getModel(client),
           client,
           tableName,
@@ -877,44 +935,12 @@ export class PrismaQueue<
             const result = await worker(job, client);
             clearTimeout(warnTimer);
             debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
-            const date = new Date();
-            await job.update({ finishedAt: date, progress: 100, result, error: null });
-            if (deleteOn === "success" || deleteOn === "always") {
-              await job.delete();
-            }
+            await this.#recordSuccess(job, result);
             outcome = { job, status: "success", result };
           } catch (error) {
             clearTimeout(warnTimer);
-            const date = new Date();
-            debug(
-              `failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${String(error)}"`,
-            );
-            const delay = this.config.retryStrategy({ attempts, maxAttempts, error });
-            const isFinished = delay === null;
-            if (!isFinished) {
-              const notBefore = new Date(date.getTime() + delay);
-              debug(`will retry at notBefore=${notBefore.toISOString()} (attempts=${attempts})`);
-              await job.update({
-                processedAt: null,
-                finishedAt: null,
-                failedAt: date,
-                error: serializeError(error),
-                notBefore,
-              });
-            } else {
-              await job.update({
-                finishedAt: date,
-                failedAt: date,
-                deadLetteredAt: date,
-                error: serializeError(error),
-                notBefore: null,
-              });
-            }
-            // Terminal failures become dead-letters: retained for inspection unless deleteOn:"always".
-            if (isFinished && deleteOn === "always") {
-              await job.delete();
-            }
-            outcome = { job, status: "error", error, deadLettered: isFinished };
+            const deadLettered = await this.#recordFailure(job, claimed, error);
+            outcome = { job, status: "error", error, deadLettered };
           }
         }
         // #3 Enqueue the next occurrence inside the same transaction so completion and the next
@@ -935,41 +961,22 @@ export class PrismaQueue<
   }
 
   private async dequeueNonTransactional(): Promise<DequeueOutcome<T, U>> {
-    const { name: queueName } = this;
-    const { deleteOn } = this.config;
     const tableName = this.#escapedTableName;
     const now = new Date();
     const worker = this.worker as JobWorkerWithClient<T, U, C>;
 
     // Phase 1: Claim the job atomically (single-statement implicit transaction)
-    const rows: DatabaseJob<T, U>[] = await (this.#prisma as any).$queryRawUnsafe(
-      `UPDATE ${tableName} SET "processedAt" = $2, "attempts" = "attempts" + 1
-       WHERE id = (
-         SELECT id
-         FROM ${tableName}
-         WHERE (${tableName}."queue" = $1)
-           AND (${tableName}."finishedAt" IS NULL)
-           AND (${tableName}."processedAt" IS NULL)
-           AND (${tableName}."runAt" <= $2)
-           AND (${tableName}."notBefore" IS NULL OR ${tableName}."notBefore" <= $2)
-         ORDER BY ${tableName}."priority" ASC, ${tableName}."runAt" ASC
-         FOR UPDATE SKIP LOCKED
-         LIMIT 1
-       )
-       RETURNING *;`,
-      queueName,
-      now,
-    );
+    const claimed = await this.#claimNext(this.#prisma, now);
 
-    if (!rows.length || !rows[0]) {
+    if (!claimed) {
       debug(`no jobs found in queue named="${this.name}"`);
       return { job: null, status: "none" };
     }
 
-    const { id, payload, attempts, maxAttempts } = rows[0];
+    const { id, payload, attempts, maxAttempts } = claimed;
     // Per-job abort signal: aborts on stop() or on the per-job timeout below.
     const { controller, cleanup } = this.#createJobAbort();
-    const job = new PrismaJob<T, U>(rows[0], {
+    const job = new PrismaJob<T, U>(claimed, {
       model: this.model,
       client: this.#prisma,
       tableName,
@@ -991,44 +998,12 @@ export class PrismaQueue<
       debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
 
       // Phase 3a: Update success
-      const date = new Date();
-      await job.update({ finishedAt: date, progress: 100, result, error: null });
-      if (deleteOn === "success" || deleteOn === "always") {
-        await job.delete();
-      }
+      await this.#recordSuccess(job, result);
       return { job, status: "success", result };
     } catch (error) {
       // Phase 3b: Update error/retry
-      const date = new Date();
-      debug(
-        `failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${String(error)}"`,
-      );
-      const delay = this.config.retryStrategy({ attempts, maxAttempts, error });
-      const isFinished = delay === null;
-      if (!isFinished) {
-        const notBefore = new Date(date.getTime() + delay);
-        debug(`will retry at notBefore=${notBefore.toISOString()} (attempts=${attempts})`);
-        await job.update({
-          processedAt: null,
-          finishedAt: null,
-          failedAt: date,
-          error: serializeError(error),
-          notBefore,
-        });
-      } else {
-        await job.update({
-          finishedAt: date,
-          failedAt: date,
-          deadLetteredAt: date,
-          error: serializeError(error),
-          notBefore: null,
-        });
-      }
-      // Terminal failures become dead-letters: retained for inspection unless deleteOn:"always".
-      if (isFinished && deleteOn === "always") {
-        await job.delete();
-      }
-      return { job, status: "error", error, deadLettered: isFinished };
+      const deadLettered = await this.#recordFailure(job, claimed, error);
+      return { job, status: "error", error, deadLettered };
     } finally {
       cleanup();
     }
