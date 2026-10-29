@@ -243,7 +243,7 @@ A job that exhausts `maxAttempts` (default **5**) is permanently **dead-lettered
 
 ```ts
 queue.on("dead", (error, job) => {
-  alert(`Job ${job.id} dead-lettered after ${job.maxAttempts} attempts`, error);
+  alert(`Job ${job.id} dead-lettered after ${job.record.attempts} attempts`, error);
 });
 
 // Monitor backlog and dead-letter depth (counts are mutually exclusive)
